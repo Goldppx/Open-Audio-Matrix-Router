@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -32,6 +33,17 @@ void close_socket(Socket socket) { closesocket(socket); }
 using Socket = int; constexpr Socket kInvalidSocket = -1;
 void close_socket(Socket socket) { close(socket); }
 #endif
+
+std::string env_or(const char* name, const char* fallback) {
+#ifdef _WIN32
+    char* value = nullptr; std::size_t size = 0;
+    if (_dupenv_s(&value, &size, name) == 0 && value) { std::string result(value); std::free(value); return result; }
+    return fallback;
+#else
+    const char* value = std::getenv(name);
+    return value && *value ? std::string(value) : std::string(fallback);
+#endif
+}
 
 std::string escape(const std::string& value) {
     std::ostringstream out; out << std::hex << std::uppercase;
@@ -88,7 +100,7 @@ class PairingService::Impl {
 public:
     mutable std::mutex mutex;
     std::atomic_bool stopping{false}; std::thread worker; Socket listener{kInvalidSocket}; std::uint16_t listen_port{};
-    std::string error, node_id{random_hex(24)}, alias{[] { const char* name = std::getenv("COMPUTERNAME"); return name && *name ? std::string{name} : std::string{"This computer"}; }()}, pair_code; std::chrono::steady_clock::time_point code_expiry{};
+    std::string error, node_id{random_hex(24)}, alias{env_or("COMPUTERNAME", "This computer")}, pair_code; std::chrono::steady_clock::time_point code_expiry{};
     std::vector<ExposedEndpoint> exposed; AudioTelemetry local_telemetry; std::map<std::string, RemotePeer> known_peers;
     std::function<bool(const RemoteRouteRequest&, std::string&)> route_handler;
 
@@ -131,7 +143,7 @@ public:
             if (node == query.end() || kind == query.end() || device == query.end() || port == query.end() || quality == query.end() || latency == query.end() || mode == query.end()) return "error=invalid-route";
             RemoteRouteRequest request; std::function<bool(const RemoteRouteRequest&, std::string&)> handler;
             { std::lock_guard lock(mutex); const auto peer = known_peers.find(node->second); if (peer == known_peers.end()) return "error=unpaired-peer"; try { request.kind = kind->second == "send" ? RemoteRouteKind::Send : RemoteRouteKind::Receive; request.device_id = device->second; request.host = peer->second.host; request.port = static_cast<std::uint16_t>(std::stoul(port->second)); request.quality = quality->second; request.max_latency_ms = static_cast<std::uint16_t>(std::stoul(latency->second)); request.mode = mode->second; request.render_loopback = query.contains("loopback") && query.at("loopback") == "true"; handler = route_handler; } catch (...) { return "error=invalid-route"; } }
-            std::string error; return handler && handler(request, error) ? "ok" : "error=" + escape(error.empty() ? "route-not-available" : error);
+            std::string failure; return handler && handler(request, failure) ? "ok" : "error=" + escape(failure.empty() ? "route-not-available" : failure);
         }
         if (target.rfind("/pair?", 0) != 0) return "error=not-found";
         const auto code = query.find("code"), node = query.find("node"), peer_alias = query.find("alias"), peer_port = query.find("port");
@@ -179,7 +191,7 @@ void PairingService::set_local_alias(std::string alias) { std::lock_guard lock(i
 std::string PairingService::local_alias() const { std::lock_guard lock(impl_->mutex); return impl_->alias; }
 void PairingService::set_exposed_endpoints(std::vector<ExposedEndpoint> endpoints) { std::lock_guard lock(impl_->mutex); impl_->exposed = std::move(endpoints); impl_->save_unlocked(); }
 std::vector<ExposedEndpoint> PairingService::exposed_endpoints() const { std::lock_guard lock(impl_->mutex); return impl_->exposed; }
-std::string PairingService::create_pair_code() { std::lock_guard lock(impl_->mutex); impl_->pair_code = random_hex(6); std::transform(impl_->pair_code.begin(), impl_->pair_code.end(), impl_->pair_code.begin(), ::toupper); impl_->code_expiry = std::chrono::steady_clock::now() + std::chrono::minutes(10); return impl_->pair_code; }
+std::string PairingService::create_pair_code() { std::lock_guard lock(impl_->mutex); impl_->pair_code = random_hex(6); std::transform(impl_->pair_code.begin(), impl_->pair_code.end(), impl_->pair_code.begin(), [](unsigned char c) { return static_cast<char>(::toupper(c)); }); impl_->code_expiry = std::chrono::steady_clock::now() + std::chrono::minutes(10); return impl_->pair_code; }
 std::vector<RemotePeer> PairingService::peers() const { std::lock_guard lock(impl_->mutex); std::vector<RemotePeer> result; for (const auto& [_, peer] : impl_->known_peers) result.push_back(peer); return result; }
 void PairingService::set_telemetry(AudioTelemetry telemetry) { std::lock_guard lock(impl_->mutex); impl_->local_telemetry = std::move(telemetry); impl_->save_unlocked(); }
 AudioTelemetry PairingService::telemetry() const { std::lock_guard lock(impl_->mutex); return impl_->local_telemetry; }
