@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -27,6 +28,17 @@ struct RemotePeer {
     std::uint16_t port{};
     std::vector<ExposedEndpoint> endpoints;
     AudioTelemetry telemetry;
+};
+enum class RemoteRouteKind { Send, Receive };
+struct RemoteRouteRequest {
+    RemoteRouteKind kind{};
+    std::string device_id;
+    std::string host;
+    std::uint16_t port{};
+    std::string quality{"medium"};
+    std::uint16_t max_latency_ms{100};
+    std::string mode{"auto"};
+    bool render_loopback{};
 };
 
 /**
@@ -59,6 +71,9 @@ public:
     /** Calls a remote pairing port with its current one-time code. */
     bool pair_remote(const std::string& host, std::uint16_t port, const std::string& alias, const std::string& code);
     bool set_peer_alias(const std::string& node_id, std::string alias);
+    bool set_peer_endpoint(const std::string& node_id, std::string host, std::uint16_t port);
+    void set_remote_route_handler(std::function<bool(const RemoteRouteRequest&, std::string&)> handler);
+    bool request_remote_route(const std::string& node_id, const RemoteRouteRequest& request);
     [[nodiscard]] std::vector<RemotePeer> peers() const;
 
 private:

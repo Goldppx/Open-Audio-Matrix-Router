@@ -90,6 +90,7 @@ public:
     std::atomic_bool stopping{false}; std::thread worker; Socket listener{kInvalidSocket}; std::uint16_t listen_port{};
     std::string error, node_id{random_hex(24)}, alias{[] { const char* name = std::getenv("COMPUTERNAME"); return name && *name ? std::string{name} : std::string{"This computer"}; }()}, pair_code; std::chrono::steady_clock::time_point code_expiry{};
     std::vector<ExposedEndpoint> exposed; AudioTelemetry local_telemetry; std::map<std::string, RemotePeer> known_peers;
+    std::function<bool(const RemoteRouteRequest&, std::string&)> route_handler;
 
     std::filesystem::path state_path() const { return std::filesystem::current_path() / "oamr-pairing-state.txt"; }
     void save_unlocked() const {
@@ -124,6 +125,13 @@ public:
             std::lock_guard lock(mutex); const auto it = known_peers.find(node->second);
             if (it == known_peers.end()) return "error=unpaired-peer";
             try { it->second.alias = peer_alias->second; it->second.host = host; it->second.port = static_cast<std::uint16_t>(std::stoul(peer_port->second)); it->second.endpoints = deserialize(catalog->second); it->second.telemetry = deserialize_telemetry(telemetry->second); save_unlocked(); return "ok"; } catch (...) { return "error=invalid-update"; }
+        }
+        if (target.rfind("/route?", 0) == 0) {
+            const auto node = query.find("node"), kind = query.find("kind"), device = query.find("device"), port = query.find("port"), quality = query.find("quality"), latency = query.find("latency"), mode = query.find("mode");
+            if (node == query.end() || kind == query.end() || device == query.end() || port == query.end() || quality == query.end() || latency == query.end() || mode == query.end()) return "error=invalid-route";
+            RemoteRouteRequest request; std::function<bool(const RemoteRouteRequest&, std::string&)> handler;
+            { std::lock_guard lock(mutex); const auto peer = known_peers.find(node->second); if (peer == known_peers.end()) return "error=unpaired-peer"; try { request.kind = kind->second == "send" ? RemoteRouteKind::Send : RemoteRouteKind::Receive; request.device_id = device->second; request.host = peer->second.host; request.port = static_cast<std::uint16_t>(std::stoul(port->second)); request.quality = quality->second; request.max_latency_ms = static_cast<std::uint16_t>(std::stoul(latency->second)); request.mode = mode->second; request.render_loopback = query.contains("loopback") && query.at("loopback") == "true"; handler = route_handler; } catch (...) { return "error=invalid-route"; } }
+            std::string error; return handler && handler(request, error) ? "ok" : "error=" + escape(error.empty() ? "route-not-available" : error);
         }
         if (target.rfind("/pair?", 0) != 0) return "error=not-found";
         const auto code = query.find("code"), node = query.find("node"), peer_alias = query.find("alias"), peer_port = query.find("port");
@@ -209,6 +217,21 @@ bool PairingService::set_peer_alias(const std::string& node_id, std::string alia
     std::lock_guard lock(impl_->mutex); const auto it = impl_->known_peers.find(node_id);
     if (it == impl_->known_peers.end() || alias.empty()) return false;
     it->second.alias = std::move(alias); impl_->save_unlocked(); return true;
+}
+bool PairingService::set_peer_endpoint(const std::string& node_id, std::string host, std::uint16_t port) {
+    std::lock_guard lock(impl_->mutex); const auto it = impl_->known_peers.find(node_id);
+    if (it == impl_->known_peers.end() || host.empty() || port == 0) return false;
+    it->second.host = std::move(host); it->second.port = port; impl_->save_unlocked(); return true;
+}
+void PairingService::set_remote_route_handler(std::function<bool(const RemoteRouteRequest&, std::string&)> handler) { std::lock_guard lock(impl_->mutex); impl_->route_handler = std::move(handler); }
+bool PairingService::request_remote_route(const std::string& node_id, const RemoteRouteRequest& request) {
+    RemotePeer peer; std::string local_node;
+    { std::lock_guard lock(impl_->mutex); const auto it = impl_->known_peers.find(node_id); if (it == impl_->known_peers.end()) { impl_->error = "Paired device not found."; return false; } peer = it->second; local_node = impl_->node_id; }
+    addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM; addrinfo* addresses{};
+    if (getaddrinfo(peer.host.c_str(), std::to_string(peer.port).c_str(), &hints, &addresses) != 0) { impl_->error = "Could not resolve paired device."; return false; }
+    Socket socket_fd = socket(addresses->ai_family, addresses->ai_socktype, addresses->ai_protocol); if (socket_fd == kInvalidSocket || connect(socket_fd, addresses->ai_addr, static_cast<int>(addresses->ai_addrlen)) != 0) { if (socket_fd != kInvalidSocket) close_socket(socket_fd); freeaddrinfo(addresses); impl_->error = "Could not connect to paired device."; return false; }
+    freeaddrinfo(addresses); const std::string target = "/route?node=" + escape(local_node) + "&kind=" + (request.kind == RemoteRouteKind::Send ? "send" : "receive") + "&device=" + escape(request.device_id) + "&port=" + std::to_string(request.port) + "&quality=" + escape(request.quality) + "&latency=" + std::to_string(request.max_latency_ms) + "&mode=" + escape(request.mode) + "&loopback=" + (request.render_loopback ? "true" : "false");
+    const std::string message = "POST " + target + " HTTP/1.1\r\nHost: " + peer.host + "\r\nConnection: close\r\n\r\n"; send(socket_fd, message.data(), static_cast<int>(message.size()), 0); char buffer[4096]{}; const int received = recv(socket_fd, buffer, sizeof(buffer)-1, 0); close_socket(socket_fd); std::string response(buffer, received > 0 ? static_cast<std::size_t>(received) : 0); const auto body = response.find("\r\n\r\n"); const std::string reply = response.substr(body == std::string::npos ? 0 : body + 4); if (reply != "ok") { impl_->error = reply.empty() ? "Paired device rejected route." : unescape(reply.substr(reply.rfind('=') + 1)); return false; } return true;
 }
 
 } // namespace oamr::pairing
