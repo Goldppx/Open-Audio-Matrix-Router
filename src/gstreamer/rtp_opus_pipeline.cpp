@@ -1,4 +1,4 @@
-#include "oamr/gstreamer/rtp_opus_pipeline.hpp"
+#include "rtp_opus_pipeline.h"
 
 #include <gst/gst.h>
 
@@ -8,7 +8,7 @@
 namespace oamr::gstreamer {
 namespace {
 
-bool valid_pcm(const PcmSettings& pcm) {
+bool valid_pcm(const audio::PcmSettings& pcm) {
     return pcm.sample_rate > 0 && pcm.channels > 0 && (pcm.opus_frame_ms == 5 || pcm.opus_frame_ms == 10 || pcm.opus_frame_ms == 20 || pcm.opus_frame_ms == 40 || pcm.opus_frame_ms == 60);
 }
 
@@ -23,9 +23,9 @@ DeviceSelector parse_selector(const std::string& selector, const char* fallback_
     return {factory, selector.substr(delimiter + 1)};
 }
 
-std::string sender_description(const SenderSettings& settings) {
+std::string sender_description(const audio::SenderSettings& settings) {
     const DeviceSelector selected = parse_selector(settings.source_device, "autoaudiosrc");
-    const auto network = *resolve_network_profile(settings.network);
+    const auto network = *audio::resolve_network_profile(settings.network);
     std::ostringstream pipeline;
     pipeline << selected.factory << " name=source";
     if (settings.capture_render_device && selected.factory == "wasapi2src")
@@ -46,9 +46,9 @@ std::string sender_description(const SenderSettings& settings) {
     return pipeline.str();
 }
 
-std::string receiver_description(const ReceiverSettings& settings) {
+std::string receiver_description(const audio::ReceiverSettings& settings) {
     const DeviceSelector selected = parse_selector(settings.sink_device, "autoaudiosink");
-    const auto network = *resolve_network_profile(settings.network);
+    const auto network = *audio::resolve_network_profile(settings.network);
     std::ostringstream pipeline;
     pipeline << "udpsrc port=" << settings.port
              // Opus channel count is signalled by RTP/Opus itself. A fixed
@@ -65,7 +65,7 @@ std::string receiver_description(const ReceiverSettings& settings) {
     return pipeline.str();
 }
 
-std::string loopback_description(const LoopbackSettings& settings) {
+std::string loopback_description(const audio::LoopbackSettings& settings) {
     const DeviceSelector source = parse_selector(settings.source_device, "autoaudiosrc");
     const DeviceSelector sink = parse_selector(settings.sink_device, "autoaudiosink");
     std::ostringstream pipeline;
@@ -79,7 +79,7 @@ std::string loopback_description(const LoopbackSettings& settings) {
     return pipeline.str();
 }
 
-std::string fanout_description(const LocalFanoutSettings& settings) {
+std::string fanout_description(const audio::FanoutSettings& settings) {
     const DeviceSelector source = parse_selector(settings.source_device, "autoaudiosrc");
     std::ostringstream pipeline;
     pipeline << source.factory << " name=source ! audioconvert ! audioresample ! tee name=router ";
@@ -90,7 +90,7 @@ std::string fanout_description(const LocalFanoutSettings& settings) {
     return pipeline.str();
 }
 
-std::string matrix_description(const LocalMatrixSettings& settings) {
+std::string matrix_description(const audio::MatrixSettings& settings) {
     std::ostringstream pipeline;
     for (std::size_t source = 0; source < settings.source_devices.size(); ++source) {
         const auto selected = parse_selector(settings.source_devices[source], "autoaudiosrc");
@@ -127,11 +127,11 @@ public:
     GstElement* pipeline{nullptr};
     GstBus* bus{nullptr};
     std::string error;
-    std::optional<ResolvedNetworkProfile> network_profile;
+    std::optional<audio::ResolvedNetworkProfile> network_profile;
 
     struct DeviceBinding { std::string element_name; std::string device; };
 
-    bool start(const std::string& description, const std::vector<DeviceBinding>& devices, const PcmSettings* sender_pcm = nullptr) {
+    bool start(const std::string& description, const std::vector<DeviceBinding>& devices, const audio::PcmSettings* sender_pcm = nullptr) {
         stop();
         GError* parse_error = nullptr;
         pipeline = gst_parse_launch(description.c_str(), &parse_error);
@@ -210,8 +210,8 @@ public:
 RtpOpusPipeline::RtpOpusPipeline() : impl_(std::make_unique<Impl>()) { gst_init(nullptr, nullptr); }
 RtpOpusPipeline::~RtpOpusPipeline() { stop(); }
 
-bool RtpOpusPipeline::start_sender(const SenderSettings& settings) {
-    const auto network = resolve_network_profile(settings.network);
+bool RtpOpusPipeline::start_sender(const audio::SenderSettings& settings) {
+    const auto network = audio::resolve_network_profile(settings.network);
     if (settings.host.empty() || settings.port == 0 || !valid_pcm(settings.pcm) || !network) {
         impl_->error = "Sender requires a host, non-zero port, and valid Opus PCM settings.";
         return false;
@@ -222,8 +222,8 @@ bool RtpOpusPipeline::start_sender(const SenderSettings& settings) {
     return started;
 }
 
-bool RtpOpusPipeline::start_receiver(const ReceiverSettings& settings) {
-    const auto network = resolve_network_profile(settings.network);
+bool RtpOpusPipeline::start_receiver(const audio::ReceiverSettings& settings) {
+    const auto network = audio::resolve_network_profile(settings.network);
     if (settings.port == 0 || !valid_pcm(settings.pcm) || !network) {
         impl_->error = "Receiver requires a non-zero port and valid Opus PCM settings.";
         return false;
@@ -233,7 +233,7 @@ bool RtpOpusPipeline::start_receiver(const ReceiverSettings& settings) {
     return started;
 }
 
-bool RtpOpusPipeline::start_loopback(const LoopbackSettings& settings) {
+bool RtpOpusPipeline::start_loopback(const audio::LoopbackSettings& settings) {
     if (!valid_pcm(settings.pcm)) {
         impl_->error = "Loopback requires valid PCM settings.";
         return false;
@@ -243,7 +243,7 @@ bool RtpOpusPipeline::start_loopback(const LoopbackSettings& settings) {
     return impl_->start(loopback_description(settings), source.device, "source", sink.device, "sink");
 }
 
-bool RtpOpusPipeline::start_local_fanout(const LocalFanoutSettings& settings) {
+bool RtpOpusPipeline::start_local_fanout(const audio::FanoutSettings& settings) {
     if (settings.sink_devices.empty() || !valid_pcm(settings.pcm)) {
         impl_->error = "Local fanout requires at least one sink and valid PCM settings.";
         return false;
@@ -255,7 +255,7 @@ bool RtpOpusPipeline::start_local_fanout(const LocalFanoutSettings& settings) {
     return impl_->start(fanout_description(settings), devices);
 }
 
-bool RtpOpusPipeline::start_local_matrix(const LocalMatrixSettings& settings) {
+bool RtpOpusPipeline::start_local_matrix(const audio::MatrixSettings& settings) {
     if (settings.source_devices.empty() || settings.sink_devices.empty() || settings.routes.empty() || !valid_pcm(settings.pcm)) {
         impl_->error = "Local matrix requires sources, sinks, routes, and valid PCM settings.";
         return false;
@@ -272,6 +272,6 @@ void RtpOpusPipeline::stop() noexcept { impl_->stop(); }
 bool RtpOpusPipeline::poll() { return impl_->poll(); }
 bool RtpOpusPipeline::is_running() const noexcept { return impl_->pipeline != nullptr; }
 const std::string& RtpOpusPipeline::last_error() const noexcept { return impl_->error; }
-std::optional<ResolvedNetworkProfile> RtpOpusPipeline::resolved_network_profile() const noexcept { return impl_->network_profile; }
+std::optional<audio::ResolvedNetworkProfile> RtpOpusPipeline::resolved_network_profile() const noexcept { return impl_->network_profile; }
 
 } // namespace oamr::gstreamer

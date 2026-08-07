@@ -1,11 +1,19 @@
-#include "oamr/gstreamer/device_enumerator.hpp"
+#include "device_enumerator.h"
 
 #include <gst/gst.h>
+
+#include <string>
+#include <vector>
 
 namespace oamr::gstreamer {
 namespace {
 
 void unref_gst_object(gpointer object) { gst_object_unref(object); }
+
+bool is_default_name(const std::string& name) {
+    // GStreamer's WASAPI provider labels defaults as "Default Audio ...".
+    return name.rfind("Default Audio ", 0) == 0;
+}
 
 std::string selector_for(GstElement* element) {
     if (element == nullptr) return {};
@@ -24,14 +32,14 @@ std::string selector_for(GstElement* element) {
     return selector;
 }
 
-std::vector<DiscoveredDevice> list_devices(const gchar* klass, PortDirection direction) {
+std::vector<audio::DeviceInfo> list_devices(const gchar* klass, audio::PortDirection direction) {
     gst_init(nullptr, nullptr);
     GstDeviceMonitor* monitor = gst_device_monitor_new();
     gst_device_monitor_add_filter(monitor, klass, nullptr);
     gst_device_monitor_start(monitor);
     GList* devices = gst_device_monitor_get_devices(monitor);
 
-    std::vector<DiscoveredDevice> result;
+    std::vector<audio::DeviceInfo> result;
     for (GList* item = devices; item != nullptr; item = item->next) {
         auto* device = GST_DEVICE(item->data);
         const gchar* display_name = gst_device_get_display_name(device);
@@ -40,9 +48,11 @@ std::vector<DiscoveredDevice> list_devices(const gchar* klass, PortDirection dir
         const gchar* factory_name = factory ? GST_OBJECT_NAME(factory) : "unknown";
         const std::string selector = selector_for(element);
         // Some plugins do not expose a string `device` property. They remain
-        // discoverable but use the default endpoint until that backend gains a selector.
+        // discoverable but use the default endpoint until that backend gains a
+        // selector (a trailing `|` marks them as default-only).
         result.push_back({selector.empty() ? std::string(factory_name) + "|" : selector,
-                          display_name ? display_name : "Unnamed device", direction, !selector.empty()});
+                          display_name ? display_name : "Unnamed device", direction,
+                          is_default_name(display_name ? display_name : ""), {}});
         if (element != nullptr) gst_object_unref(element);
     }
     g_list_free_full(devices, unref_gst_object);
@@ -53,12 +63,12 @@ std::vector<DiscoveredDevice> list_devices(const gchar* klass, PortDirection dir
 
 } // namespace
 
-std::vector<DiscoveredDevice> DeviceEnumerator::list_capture_devices() const {
-    return list_devices("Audio/Source", PortDirection::Source);
+std::vector<audio::DeviceInfo> DeviceEnumerator::list_capture_devices() const {
+    return list_devices("Audio/Source", audio::PortDirection::Source);
 }
 
-std::vector<DiscoveredDevice> DeviceEnumerator::list_playback_devices() const {
-    return list_devices("Audio/Sink", PortDirection::Sink);
+std::vector<audio::DeviceInfo> DeviceEnumerator::list_playback_devices() const {
+    return list_devices("Audio/Sink", audio::PortDirection::Sink);
 }
 
 } // namespace oamr::gstreamer
