@@ -140,6 +140,26 @@ The current transport applies the selected initial profile to GStreamer. The
 next transport increment adds the receiver-to-sender LAN feedback channel that
 supplies measured loss, jitter, and playout delay to Auto mode.
 
+### LAN pairing and exposed-device catalog
+
+`run-oamr.cmd web --port 8790` keeps the Web UI bound to
+`127.0.0.1:8790`. Pairing uses a separate, narrowly scoped TCP listener on
+port `8791`; it accepts only a one-time, six-character code generated on the
+receiving computer's local Web UI. Allow TCP 8791 on a Private network if
+Windows Firewall asks; no inbound rule is needed for the Web UI itself.
+
+In **设备配对**, select the local capture, render-loopback, and/or sink devices
+that may be shown to paired computers, save the profile, and generate a code.
+On the other machine, enter this computer's IP, `8791`, an alias, and the
+code. The peer's allowed device catalog is then shown in **已配对设备** and is
+stored next to the executable in `oamr-pairing-state.txt` (excluded from Git).
+The Web UI itself never listens on a LAN interface.
+
+Pairing exchanges device metadata only. RTP/Opus audio still uses the explicit
+send/receive cards and UDP port selected by the user; remote graph control is
+intentionally not inferred from pairing because it needs a persistent,
+authenticated control protocol.
+
 For same-computer microphone-to-speaker testing:
 
 ```bash
