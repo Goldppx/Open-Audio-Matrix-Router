@@ -27,19 +27,23 @@ C++20/CMake 项目增加可靠的 Linux 音频设备支持。
 ## 2. 现有项目结构与必须保留的边界
 
 ```text
+include/oamr/audio/ 平台无关的 AudioBackend / AudioRoute 接口与设置结构体
 src/core/        平台无关的 AudioNode / AudioPort / AudioGraph
-src/gstreamer/   设备枚举、GStreamer 路由与 RTP/Opus 管线
+src/gstreamer/   设备枚举、GStreamer 路由与 RTP/Opus 管线（后端内部实现）
 src/pairing/     一次性码、已配对设备目录、遥测与远端路由请求
 src/web/         仅回环 Web UI、路由表和矩阵 API
 apps/oamr/       命令行入口
 ```
 
-不要把 Linux API 逻辑塞入 `src/web`、`src/pairing` 或 `src/core`。
-Linux 适配应集中在 `src/gstreamer`，必要时新增小型平台辅助文件，例如：
+Web/CLI/测试只能使用 `include/oamr/audio/*` 的公共接口，通过
+`oamr::audio::create_audio_backend()` 获得后端；不要引入 `src/gstreamer`
+的内部头文件。不要把 Linux API 逻辑塞入 `src/web`、`src/pairing` 或
+`src/core`。Linux 适配应集中在 `src/gstreamer`（或未来的独立 backend
+目录），必要时新增小型平台辅助文件，例如：
 
 ```text
 src/gstreamer/linux_device_backend.cpp
-include/oamr/gstreamer/linux_device_backend.hpp
+src/gstreamer/linux_device_backend.h
 ```
 
 现有 Web/API 使用的设备选择器格式为：
@@ -98,12 +102,15 @@ ALSA 是硬件层，设备独占、混音、热插拔和“系统播放回采”
 文件：
 
 ```text
-include/oamr/gstreamer/device_enumerator.hpp
+src/gstreamer/device_enumerator.h
 src/gstreamer/device_enumerator.cpp
 ```
 
-现状：设备监视器已能发现 GStreamer 设备，但当前 Web 层针对 WASAPI 名称、
-默认设备与 endpoint 的处理包含 Windows 假设。
+`DeviceEnumerator` 已降级为 GStreamer 后端的内部实现，不再对外暴露公共头文件；
+Web/CLI 通过 `oamr::audio::AudioBackend::list_sources()/list_sinks()` 消费设备
+（见 `include/oamr/audio/audio_backend.hpp` 与 `audio_types.hpp` 的
+`DeviceInfo`）。现状：设备监视器已能发现 GStreamer 设备，但枚举逻辑仍带有
+WASAPI 名称、默认设备与 endpoint 的处理。
 
 Linux 实现要求：
 
@@ -124,37 +131,38 @@ Linux 实现要求：
 - `Default Audio Capture Device` / `Default Audio Render Device` 名称；
 - `loopback=true` WASAPI 属性。
 
-### 4.2 Web 设备目录转换
+### 4.2 设备目录与 render-loopback 转换
 
 文件：
 
 ```text
-src/web/web_server.cpp
+src/gstreamer/audio_backend.cpp   （render_source_selector / list_sources）
+src/web/web_server.cpp            （只消费 DeviceInfo 语义字段）
 ```
 
-当前 `devices_json()` 使用 `wasapi2sink|` 到 `wasapi2src|` 的转换生成
-render-loopback source。这段逻辑必须平台化：
+当前后端在 `render_source_selector()` 中把 `wasapi2sink|` 转换为
+`wasapi2src|` 生成 render-loopback source。这段逻辑必须平台化：
 
 - Windows：保留现有 WASAPI loopback 行为。
 - Linux：由枚举器直接提供 monitor source；不要伪造 `pipewiresink` 到
   `pipewiresrc` 的字符串转换。
 
-建议给 `AudioDeviceInfo` 增加明确字段，而不是依赖 factory 前缀推断：
-
-```cpp
-bool is_render_loopback_source{};
-std::string endpoint_id;
-```
-
-然后 Web 层只消费这些语义字段。
+`audio::DeviceInfo` 已经用 `loopback_of` 字段标记 render-loopback source
+（指向其监听的 sink 设备 id），Web 层只消费这些语义字段，不再依赖
+factory 前缀推断。
 
 ### 4.3 GStreamer 管线
 
-文件：
+文件（后端内部实现）：
 
 ```text
 src/gstreamer/rtp_opus_pipeline.cpp
+src/gstreamer/audio_backend.cpp
 ```
+
+公共契约见 `include/oamr/audio/audio_types.hpp`：sender/receiver 使用
+`SenderSettings` / `ReceiverSettings`，网络参数统一由 `NetworkProfile`
+经 `resolve_network_profile()` 解析。
 
 当前代码已经把 source/sink selector 解析为：
 
