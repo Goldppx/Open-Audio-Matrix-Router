@@ -34,7 +34,9 @@ std::string sender_description(const SenderSettings& settings) {
     // rate, not sample representation, and opusenc requires S16LE.
     pipeline << " ! audioconvert name=sender_convert_input ! audioresample name=sender_resample ! "
              << "audioconvert name=sender_convert_opus ! "
-             << "audio/x-raw,format=S16LE,layout=interleaved,rate=" << settings.pcm.sample_rate << ",channels=" << settings.pcm.channels
+             // Do not force a channel count here. Real capture devices may be
+             // mono or stereo; Opus and rtpopuspay carry that information.
+             << "audio/x-raw,format=S16LE,layout=interleaved,rate=" << settings.pcm.sample_rate
              << " ! opusenc name=opus_encoder bitrate=" << network.opus_bitrate_bps << " frame-size=" << network.opus_frame_ms
              << " inband-fec=" << (network.inband_fec ? "true" : "false")
              << " packet-loss-percentage=" << (network.inband_fec ? 3 : 0)
@@ -48,7 +50,9 @@ std::string receiver_description(const ReceiverSettings& settings) {
     const auto network = *resolve_network_profile(settings.network);
     std::ostringstream pipeline;
     pipeline << "udpsrc port=" << settings.port
-             << " caps=\"application/x-rtp,media=audio,encoding-name=OPUS,payload=96,clock-rate=48000,encoding-params=" << settings.pcm.channels << "\" "
+             // Opus channel count is signalled by RTP/Opus itself. A fixed
+             // encoding-params=2 rejects valid mono sources on other hosts.
+             << " caps=\"application/x-rtp,media=audio,encoding-name=OPUS,payload=96,clock-rate=48000\" "
              << "! rtpjitterbuffer latency=" << network.jitter_buffer_ms
              << " drop-on-latency=" << (network.drop_on_latency ? "true" : "false")
              << " do-lost=true"
