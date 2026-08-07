@@ -265,7 +265,14 @@ public:
         if (method == "POST" && target.rfind("/api/pair/config", 0) == 0) {
             const auto query = query_params(target); const auto alias = query.find("alias"), endpoints = query.find("endpoints"); if (alias == query.end()) return "Missing local alias.";
             pairing.set_local_alias(alias->second); std::vector<pairing::ExposedEndpoint> exposed;
-            if (endpoints != query.end()) { std::stringstream rows(endpoints->second); std::string row; while (std::getline(rows, row, '\n')) {
+            if (endpoints != query.end()) {
+                // The compact embedded UI serializes separators as JavaScript
+                // escapes. Accept those literals as well as real tabs/newlines
+                // so exposed-device updates cannot silently become empty.
+                std::string endpoint_text = endpoints->second;
+                for (std::size_t position = 0; (position = endpoint_text.find("\\n", position)) != std::string::npos; ++position) endpoint_text.replace(position, 2, "\n");
+                for (std::size_t position = 0; (position = endpoint_text.find("\\t", position)) != std::string::npos; ++position) endpoint_text.replace(position, 2, "\t");
+                std::stringstream rows(endpoint_text); std::string row; while (std::getline(rows, row, '\n')) {
                 const auto first_tab = row.find('\t'); const auto second_tab = row.find('\t', first_tab + 1);
                 if (first_tab == std::string::npos || row.empty()) continue;
                 const auto id = row.substr(first_tab + 1, second_tab == std::string::npos ? std::string::npos : second_tab - first_tab - 1);
@@ -336,9 +343,9 @@ public:
             // sequences. Normalize them before parsing, while still accepting
             // ordinary literal tabs/newlines from other future clients.
             std::string route_text = routes->second;
-            for (std::size_t position = 0; (position = route_text.find("\\\\n", position)) != std::string::npos; ++position)
+            for (std::size_t position = 0; (position = route_text.find("\\n", position)) != std::string::npos; ++position)
                 route_text.replace(position, 2, "\n");
-            for (std::size_t position = 0; (position = route_text.find("\\\\t", position)) != std::string::npos; ++position)
+            for (std::size_t position = 0; (position = route_text.find("\\t", position)) != std::string::npos; ++position)
                 route_text.replace(position, 2, "\t");
             std::stringstream stream(route_text); std::string line;
             while (std::getline(stream, line, '\n')) {
