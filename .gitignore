@@ -3,6 +3,7 @@
 /build-*/
 /out/
 /dist/
+/.portable-stage-*/
 /CMakeCache.txt
 /CMakeFiles/
 /Testing/
