@@ -1,11 +1,12 @@
-#include "oamr/gstreamer/device_enumerator.hpp"
-#include "oamr/gstreamer/rtp_opus_pipeline.hpp"
+#include "oamr/audio/audio_backend.hpp"
+#include "oamr/audio/backend_factory.hpp"
 #include "oamr/web/web_server.hpp"
 
 #include <csignal>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -59,26 +60,41 @@ bool parse_port(const std::string& text, std::uint16_t& port) {
     } catch (...) { return false; }
 }
 
-bool parse_network_profile(int argc, char** argv, oamr::gstreamer::NetworkAudioProfile& profile) {
+bool parse_network_profile(int argc, char** argv, oamr::audio::NetworkProfile& profile) {
     std::string value;
     if (option_value(argc, argv, "--quality", value)) {
-        if (value == "low") profile.quality = oamr::gstreamer::AudioQuality::Low;
-        else if (value == "medium") profile.quality = oamr::gstreamer::AudioQuality::Medium;
-        else if (value == "high") profile.quality = oamr::gstreamer::AudioQuality::High;
+        if (value == "low") profile.quality = oamr::audio::AudioQuality::Low;
+        else if (value == "medium") profile.quality = oamr::audio::AudioQuality::Medium;
+        else if (value == "high") profile.quality = oamr::audio::AudioQuality::High;
         else return false;
     }
     if (option_value(argc, argv, "--mode", value)) {
-        if (value == "stable") profile.mode = oamr::gstreamer::LatencyMode::Stable;
-        else if (value == "auto") profile.mode = oamr::gstreamer::LatencyMode::Auto;
-        else if (value == "low-latency") profile.mode = oamr::gstreamer::LatencyMode::LowLatency;
+        if (value == "stable") profile.mode = oamr::audio::LatencyMode::Stable;
+        else if (value == "auto") profile.mode = oamr::audio::LatencyMode::Auto;
+        else if (value == "low-latency") profile.mode = oamr::audio::LatencyMode::LowLatency;
         else return false;
     }
     if (option_value(argc, argv, "--max-latency-ms", value)) {
         std::uint16_t latency{};
-        if (!parse_port(value, latency) || !oamr::gstreamer::valid_max_latency(latency)) return false;
+        if (!parse_port(value, latency) || !oamr::audio::valid_max_latency(latency)) return false;
         profile.max_latency_ms = latency;
     }
     return true;
+}
+
+std::unique_ptr<oamr::audio::AudioBackend> load_backend() {
+    auto backend = oamr::audio::create_audio_backend();
+    if (!backend) std::cerr << "No audio backend is available in this build.\n";
+    return backend;
+}
+
+void run_route(std::unique_ptr<oamr::audio::AudioRoute> route) {
+    if (!route) return;
+    std::signal(SIGINT, stop_handler);
+    std::signal(SIGTERM, stop_handler);
+    while (keep_running && route->poll()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    if (!route->last_error().empty()) std::cerr << "Stopped: " << route->last_error() << "\n";
+    route->stop();
 }
 
 } // namespace
@@ -92,12 +108,14 @@ int main(int argc, char** argv) {
 #endif
     if (argc < 2) { usage(); return 1; }
     const std::string command = argv[1];
+
     if (command == "devices") {
-        oamr::gstreamer::DeviceEnumerator enumerator;
-        for (const auto& device : enumerator.list_capture_devices())
-            std::cout << "source  " << device.name << (device.selectable ? "" : " (default only)") << "\n  id: " << device.backend_id << "\n";
-        for (const auto& device : enumerator.list_playback_devices())
-            std::cout << "sink    " << device.name << (device.selectable ? "" : " (default only)") << "\n  id: " << device.backend_id << "\n";
+        auto backend = load_backend();
+        if (!backend) return 2;
+        for (const auto& device : backend->list_sources())
+            std::cout << "source  " << device.name << (device.is_default ? " (default only)" : "") << "\n  id: " << device.id << "\n";
+        for (const auto& device : backend->list_sinks())
+            std::cout << "sink    " << device.name << (device.is_default ? " (default only)" : "") << "\n  id: " << device.id << "\n";
         return 0;
     }
 
@@ -116,22 +134,24 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    auto backend = load_backend();
+    if (!backend) return 2;
+
     if (command == "loopback") {
         std::string source_device, sink_device;
         option_value(argc, argv, "--source-device", source_device);
         option_value(argc, argv, "--sink-device", sink_device);
-        const bool capture_render_device = has_option(argc, argv, "--render-loopback");
-        oamr::gstreamer::RtpOpusPipeline pipeline;
-        if (!pipeline.start_loopback({source_device, sink_device, capture_render_device})) {
-            std::cerr << "Could not start: " << pipeline.last_error() << "\n";
+        oamr::audio::LoopbackSettings settings;
+        settings.source_device = source_device;
+        settings.sink_device = sink_device;
+        settings.capture_render_device = has_option(argc, argv, "--render-loopback");
+        auto route = backend->create_loopback(settings);
+        if (!route) {
+            std::cerr << "Could not start: " << backend->last_error() << "\n";
             return 2;
         }
         std::cout << "Running. Press Ctrl+C to stop.\n";
-        std::signal(SIGINT, stop_handler);
-        std::signal(SIGTERM, stop_handler);
-        while (keep_running && pipeline.poll()) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
-        if (!pipeline.last_error().empty()) std::cerr << "Stopped: " << pipeline.last_error() << "\n";
-        pipeline.stop();
+        run_route(std::move(route));
         return 0;
     }
 
@@ -140,17 +160,16 @@ int main(int argc, char** argv) {
         option_value(argc, argv, "--source-device", source_device);
         const auto sink_devices = option_values(argc, argv, "--sink-device");
         if (sink_devices.empty()) { usage(); return 1; }
-        oamr::gstreamer::RtpOpusPipeline pipeline;
-        if (!pipeline.start_local_fanout({source_device, sink_devices})) {
-            std::cerr << "Could not start: " << pipeline.last_error() << "\n";
+        oamr::audio::FanoutSettings settings;
+        settings.source_device = source_device;
+        settings.sink_devices = sink_devices;
+        auto route = backend->create_fanout(settings);
+        if (!route) {
+            std::cerr << "Could not start: " << backend->last_error() << "\n";
             return 2;
         }
         std::cout << "Running local fanout to " << sink_devices.size() << " sink(s). Press Ctrl+C to stop.\n";
-        std::signal(SIGINT, stop_handler);
-        std::signal(SIGTERM, stop_handler);
-        while (keep_running && pipeline.poll()) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
-        if (!pipeline.last_error().empty()) std::cerr << "Stopped: " << pipeline.last_error() << "\n";
-        pipeline.stop();
+        run_route(std::move(route));
         return 0;
     }
 
@@ -160,41 +179,35 @@ int main(int argc, char** argv) {
     if (!parse_port(port_text, port)) { std::cerr << "Invalid UDP port.\n"; return 1; }
     std::string device;
     option_value(argc, argv, "--device", device);
-    oamr::gstreamer::NetworkAudioProfile network;
+    oamr::audio::NetworkProfile network;
     if (!parse_network_profile(argc, argv, network)) {
         std::cerr << "Invalid network profile.\n";
         return 1;
     }
 
-    oamr::gstreamer::RtpOpusPipeline pipeline;
-    bool started = false;
+    std::unique_ptr<oamr::audio::AudioRoute> route;
     if (command == "send") {
         std::string host;
         if (!option_value(argc, argv, "--host", host)) { usage(); return 1; }
-        oamr::gstreamer::SenderSettings settings{host, port, device};
+        oamr::audio::SenderSettings settings;
+        settings.host = host;
+        settings.port = port;
+        settings.source_device = device;
         settings.network = network;
-        started = pipeline.start_sender(settings);
+        route = backend->create_sender(settings);
     } else if (command == "receive") {
-        std::string latency_text;
-        oamr::gstreamer::ReceiverSettings settings{port, device};
+        oamr::audio::ReceiverSettings settings;
+        settings.port = port;
+        settings.sink_device = device;
         settings.network = network;
-        if (option_value(argc, argv, "--latency-ms", latency_text)) {
-            std::uint16_t latency{};
-            if (!parse_port(latency_text, latency)) { std::cerr << "Invalid latency.\n"; return 1; }
-            settings.jitter_buffer_ms = latency;
-        }
-        started = pipeline.start_receiver(settings);
+        route = backend->create_receiver(settings);
     } else { usage(); return 1; }
 
-    if (!started) { std::cerr << "Could not start: " << pipeline.last_error() << "\n"; return 2; }
-    if (const auto resolved = pipeline.resolved_network_profile())
+    if (!route) { std::cerr << "Could not start: " << backend->last_error() << "\n"; return 2; }
+    if (const auto resolved = oamr::audio::resolve_network_profile(network))
         std::cout << "Network: " << resolved->opus_bitrate_bps << " bps, " << resolved->opus_frame_ms
                   << " ms frames, " << resolved->jitter_buffer_ms << " ms jitter buffer.\n";
     std::cout << "Running. Press Ctrl+C to stop.\n";
-    std::signal(SIGINT, stop_handler);
-    std::signal(SIGTERM, stop_handler);
-    while (keep_running && pipeline.poll()) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
-    if (!pipeline.last_error().empty()) std::cerr << "Stopped: " << pipeline.last_error() << "\n";
-    pipeline.stop();
+    run_route(std::move(route));
     return 0;
 }
