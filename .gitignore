@@ -4,6 +4,7 @@
 /out/
 /dist/
 /.portable-stage-*/
+/.portable-verify-*/
 /CMakeCache.txt
 /CMakeFiles/
 /Testing/

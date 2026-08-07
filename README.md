@@ -87,8 +87,8 @@ The release installer will package a private runtime instead; this launcher is o
 ## Windows portable package
 
 Create a Release build first, then create a self-contained ZIP containing
-OAMR, the complete GStreamer MSVC runtime (including plugins), and the MSVC
-x64 app-local redistributable DLLs:
+OAMR, its minimal GStreamer runtime closure, required WASAPI/RTP/Opus plugins,
+and the MSVC x64 app-local redistributable DLLs:
 
 ```powershell
 cmake -S . -B build-portable-release -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DGSTREAMER_ROOT="C:/Program Files/GStreamer/1.0/msvc_x86_64"
@@ -101,6 +101,12 @@ extract it anywhere and run `run-oamr.cmd web --port 8792`. The package keeps
 its GStreamer DLL, plugins, and required MSVC runtime DLLs private; it does
 not modify system `PATH` or require a separate VC++ runtime installation. It
 targets supported Windows x64 systems, which provide the Windows Universal CRT.
+
+The minimal runtime intentionally includes only WASAPI device access, audio
+conversion/resampling/mixing, Opus, RTP, RTP jitter buffering, UDP, and their
+dependency DLLs. Adding a codec or platform backend requires updating the
+allowlist in `scripts/package-portable.ps1` and rerunning the extracted-package
+smoke test.
 
 On computer B (the speaker), start the receiver. The network profile is set
 independently on each endpoint; use the same latency choice on both ends for
