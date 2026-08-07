@@ -32,12 +32,13 @@ std::string sender_description(const SenderSettings& settings) {
         pipeline << " loopback=true low-latency=true";
     // The second converter is required after resampling: resampling changes
     // rate, not sample representation, and opusenc requires S16LE.
-    pipeline << " ! audioconvert ! audioresample ! audioconvert ! "
-             << "audio/x-raw,format=S16LE,rate=" << settings.pcm.sample_rate << ",channels=" << settings.pcm.channels
-             << " ! opusenc bitrate=" << network.opus_bitrate_bps << " frame-size=" << network.opus_frame_ms
+    pipeline << " ! audioconvert name=sender_convert_input ! audioresample name=sender_resample ! "
+             << "audioconvert name=sender_convert_opus ! "
+             << "audio/x-raw,format=S16LE,layout=interleaved,rate=" << settings.pcm.sample_rate << ",channels=" << settings.pcm.channels
+             << " ! opusenc name=opus_encoder bitrate=" << network.opus_bitrate_bps << " frame-size=" << network.opus_frame_ms
              << " inband-fec=" << (network.inband_fec ? "true" : "false")
              << " packet-loss-percentage=" << (network.inband_fec ? 3 : 0)
-             << " ! rtpopuspay pt=96 ! "
+             << " ! rtpopuspay name=rtp_opus_payloader pt=96 ! "
              << "udpsink host=" << settings.host << " port=" << settings.port << " sync=false async=false";
     return pipeline.str();
 }
