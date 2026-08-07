@@ -13,12 +13,20 @@ struct ExposedEndpoint {
     std::string name;
     EndpointDirection direction{};
 };
+/** Latest peer-reported transport state. Empty device_name means idle. */
+struct AudioTelemetry {
+    std::string quality{"idle"};
+    std::uint16_t target_latency_ms{};
+    double packet_loss_percent{};
+    std::string device_name;
+};
 struct RemotePeer {
     std::string node_id;
     std::string alias;
     std::string host;
     std::uint16_t port{};
     std::vector<ExposedEndpoint> endpoints;
+    AudioTelemetry telemetry;
 };
 
 /**
@@ -41,6 +49,10 @@ public:
     [[nodiscard]] std::string local_alias() const;
     void set_exposed_endpoints(std::vector<ExposedEndpoint> endpoints);
     [[nodiscard]] std::vector<ExposedEndpoint> exposed_endpoints() const;
+    void set_telemetry(AudioTelemetry telemetry);
+    [[nodiscard]] AudioTelemetry telemetry() const;
+    /** Pushes the complete current catalog and telemetry to every paired peer. */
+    void announce();
 
     /** Generates a six-digit code valid for ten minutes and one use. */
     [[nodiscard]] std::string create_pair_code();

@@ -69,6 +69,18 @@ std::vector<ExposedEndpoint> deserialize(const std::string& text) {
         result.push_back({unescape(row.substr(b + 1)), unescape(row.substr(a + 1, b - a - 1)), row[0] == 'S' ? EndpointDirection::Source : EndpointDirection::Sink}); }
     return result;
 }
+std::string serialize_telemetry(const AudioTelemetry& telemetry) {
+    std::ostringstream out;
+    out << escape(telemetry.quality) << ',' << telemetry.target_latency_ms << ',' << telemetry.packet_loss_percent << ',' << escape(telemetry.device_name);
+    return out.str();
+}
+AudioTelemetry deserialize_telemetry(const std::string& text) {
+    AudioTelemetry telemetry; std::stringstream fields(text); std::string quality, latency, loss, name;
+    std::getline(fields, quality, ','); std::getline(fields, latency, ','); std::getline(fields, loss, ','); std::getline(fields, name);
+    telemetry.quality = unescape(quality); telemetry.device_name = unescape(name);
+    try { telemetry.target_latency_ms = static_cast<std::uint16_t>(std::stoul(latency)); telemetry.packet_loss_percent = std::stod(loss); } catch (...) {}
+    return telemetry;
+}
 }
 
 class PairingService::Impl {
@@ -76,7 +88,7 @@ public:
     mutable std::mutex mutex;
     std::atomic_bool stopping{false}; std::thread worker; Socket listener{kInvalidSocket}; std::uint16_t listen_port{};
     std::string error, node_id{random_hex(24)}, alias{"This computer"}, pair_code; std::chrono::steady_clock::time_point code_expiry{};
-    std::vector<ExposedEndpoint> exposed; std::map<std::string, RemotePeer> known_peers;
+    std::vector<ExposedEndpoint> exposed; AudioTelemetry local_telemetry; std::map<std::string, RemotePeer> known_peers;
 
     std::filesystem::path state_path() const { return std::filesystem::current_path() / "oamr-pairing-state.txt"; }
     void save_unlocked() const {
@@ -86,8 +98,9 @@ public:
         file << "alias\t" << escape(alias) << "\n";
         for (const auto& endpoint : exposed)
             file << "endpoint\t" << (endpoint.direction == EndpointDirection::Source ? 'S' : 'K') << '\t' << escape(endpoint.backend_id) << '\t' << escape(endpoint.name) << "\n";
+        file << "telemetry\t" << escape(serialize_telemetry(local_telemetry)) << "\n";
         for (const auto& [id, peer] : known_peers)
-            file << "peer\t" << escape(id) << '\t' << escape(peer.alias) << '\t' << escape(peer.host) << '\t' << peer.port << '\t' << escape(serialize(peer.endpoints)) << "\n";
+            file << "peer\t" << escape(id) << '\t' << escape(peer.alias) << '\t' << escape(peer.host) << '\t' << peer.port << '\t' << escape(serialize(peer.endpoints)) << '\t' << escape(serialize_telemetry(peer.telemetry)) << "\n";
     }
     void load() {
         std::ifstream file(state_path()); std::string row;
@@ -97,12 +110,20 @@ public:
             if (fields.size() >= 2 && fields[0] == "node") node_id = unescape(fields[1]);
             else if (fields.size() >= 2 && fields[0] == "alias") alias = unescape(fields[1]);
             else if (fields.size() >= 4 && fields[0] == "endpoint") exposed.push_back({unescape(fields[2]), unescape(fields[3]), fields[1] == "S" ? EndpointDirection::Source : EndpointDirection::Sink});
-            else if (fields.size() >= 6 && fields[0] == "peer") { try { known_peers[unescape(fields[1])] = {unescape(fields[1]), unescape(fields[2]), unescape(fields[3]), static_cast<std::uint16_t>(std::stoul(fields[4])), deserialize(unescape(fields[5]))}; } catch (...) {} }
+            else if (fields.size() >= 2 && fields[0] == "telemetry") local_telemetry = deserialize_telemetry(unescape(fields[1]));
+            else if (fields.size() >= 6 && fields[0] == "peer") { try { RemotePeer peer{unescape(fields[1]), unescape(fields[2]), unescape(fields[3]), static_cast<std::uint16_t>(std::stoul(fields[4])), deserialize(unescape(fields[5]))}; if (fields.size() >= 7) peer.telemetry = deserialize_telemetry(unescape(fields[6])); known_peers[peer.node_id] = std::move(peer); } catch (...) {} }
         }
     }
 
     std::string handle(const std::string& target, const std::string& host) {
         const auto query = params(target);
+        if (target.rfind("/update?", 0) == 0) {
+            const auto node = query.find("node"), peer_alias = query.find("alias"), peer_port = query.find("port"), catalog = query.find("catalog"), telemetry = query.find("telemetry");
+            if (node == query.end() || peer_alias == query.end() || peer_port == query.end() || catalog == query.end() || telemetry == query.end()) return "error=invalid-update";
+            std::lock_guard lock(mutex); const auto it = known_peers.find(node->second);
+            if (it == known_peers.end()) return "error=unpaired-peer";
+            try { it->second.alias = peer_alias->second; it->second.host = host; it->second.port = static_cast<std::uint16_t>(std::stoul(peer_port->second)); it->second.endpoints = deserialize(catalog->second); it->second.telemetry = deserialize_telemetry(telemetry->second); save_unlocked(); return "ok"; } catch (...) { return "error=invalid-update"; }
+        }
         if (target.rfind("/pair?", 0) != 0) return "error=not-found";
         const auto code = query.find("code"), node = query.find("node"), peer_alias = query.find("alias"), peer_port = query.find("port");
         if (code == query.end() || node == query.end() || peer_alias == query.end() || peer_port == query.end()) return "error=invalid-request";
@@ -151,6 +172,23 @@ void PairingService::set_exposed_endpoints(std::vector<ExposedEndpoint> endpoint
 std::vector<ExposedEndpoint> PairingService::exposed_endpoints() const { std::lock_guard lock(impl_->mutex); return impl_->exposed; }
 std::string PairingService::create_pair_code() { std::lock_guard lock(impl_->mutex); impl_->pair_code = random_hex(6); std::transform(impl_->pair_code.begin(), impl_->pair_code.end(), impl_->pair_code.begin(), ::toupper); impl_->code_expiry = std::chrono::steady_clock::now() + std::chrono::minutes(10); return impl_->pair_code; }
 std::vector<RemotePeer> PairingService::peers() const { std::lock_guard lock(impl_->mutex); std::vector<RemotePeer> result; for (const auto& [_, peer] : impl_->known_peers) result.push_back(peer); return result; }
+void PairingService::set_telemetry(AudioTelemetry telemetry) { std::lock_guard lock(impl_->mutex); impl_->local_telemetry = std::move(telemetry); impl_->save_unlocked(); }
+AudioTelemetry PairingService::telemetry() const { std::lock_guard lock(impl_->mutex); return impl_->local_telemetry; }
+
+void PairingService::announce() {
+    std::string node, alias, catalog, telemetry; std::uint16_t listen_port{}; std::vector<RemotePeer> peers;
+    { std::lock_guard lock(impl_->mutex); node = impl_->node_id; alias = impl_->alias; catalog = serialize(impl_->exposed); telemetry = serialize_telemetry(impl_->local_telemetry); listen_port = impl_->listen_port; for (const auto& [_, peer] : impl_->known_peers) peers.push_back(peer); }
+    for (const auto& peer : peers) {
+        addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM; addrinfo* addresses{};
+        if (getaddrinfo(peer.host.c_str(), std::to_string(peer.port).c_str(), &hints, &addresses) != 0) continue;
+        Socket socket_fd = socket(addresses->ai_family, addresses->ai_socktype, addresses->ai_protocol);
+        if (socket_fd == kInvalidSocket || connect(socket_fd, addresses->ai_addr, static_cast<int>(addresses->ai_addrlen)) != 0) { if (socket_fd != kInvalidSocket) close_socket(socket_fd); freeaddrinfo(addresses); continue; }
+        freeaddrinfo(addresses);
+        const std::string target = "/update?node=" + escape(node) + "&alias=" + escape(alias) + "&port=" + std::to_string(listen_port) + "&catalog=" + escape(catalog) + "&telemetry=" + escape(telemetry);
+        const std::string request = "POST " + target + " HTTP/1.1\r\nHost: " + peer.host + "\r\nConnection: close\r\n\r\n";
+        send(socket_fd, request.data(), static_cast<int>(request.size()), 0); close_socket(socket_fd);
+    }
+}
 
 bool PairingService::pair_remote(const std::string& host, std::uint16_t port, const std::string& alias, const std::string& code) {
     addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM; addrinfo* addresses{};
@@ -162,7 +200,9 @@ bool PairingService::pair_remote(const std::string& host, std::uint16_t port, co
     char buffer[8192]{}; const int received = recv(socket_fd, buffer, sizeof(buffer) - 1, 0); close_socket(socket_fd); if (received <= 0) { impl_->error = "Pairing host sent no response."; return false; }
     std::string response(buffer, received); const auto body_at = response.find("\r\n\r\n"); const auto reply = params("?" + response.substr(body_at == std::string::npos ? 0 : body_at + 4));
     if (reply.contains("error") || !reply.contains("node")) { impl_->error = reply.contains("error") ? reply.at("error") : "Invalid pairing response."; return false; }
-    std::lock_guard lock(impl_->mutex); impl_->known_peers[reply.at("node")] = {reply.at("node"), alias, host, port, deserialize(reply.contains("catalog") ? reply.at("catalog") : "")}; impl_->save_unlocked(); return true;
+    { std::lock_guard lock(impl_->mutex); impl_->known_peers[reply.at("node")] = {reply.at("node"), alias, host, port, deserialize(reply.contains("catalog") ? reply.at("catalog") : "")}; impl_->save_unlocked(); }
+    announce();
+    return true;
 }
 
 } // namespace oamr::pairing
