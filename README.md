@@ -96,6 +96,14 @@ cmake --build build-portable-release
 .\scripts\package-portable.ps1 -BuildDirectory build-portable-release -Version 0.1.0-dev
 ```
 
+For the normal Windows release workflow, use the single helper instead. It
+configures the Release tree, runs the test suite, then writes the ZIP to
+`dist/`:
+
+```powershell
+.\scripts\build-and-package.ps1 -Version 0.1.6-telemetry
+```
+
 The generated file is placed under `dist/`. On another Windows x64 device,
 extract it anywhere and run `run-oamr.cmd web --port 8792`. The package keeps
 its GStreamer DLL, plugins, and required MSVC runtime DLLs private; it does
