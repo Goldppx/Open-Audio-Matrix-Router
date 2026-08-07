@@ -24,3 +24,6 @@
 
 # GStreamer diagnostic output
 *.dot
+
+# Per-machine pairing aliases and peer catalog (portable runtime state)
+oamr-pairing-state.txt

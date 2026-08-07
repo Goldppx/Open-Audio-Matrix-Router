@@ -44,6 +44,7 @@ if(OAMR_ENABLE_GSTREAMER)
         src/gstreamer/device_enumerator.cpp
         src/gstreamer/local_router_engine.cpp
         src/gstreamer/rtp_opus_pipeline.cpp
+        src/pairing/pairing_service.cpp
         src/web/web_server.cpp
     )
     add_library(oamr::gstreamer ALIAS oamr_gstreamer)
