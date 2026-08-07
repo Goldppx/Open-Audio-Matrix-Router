@@ -1,0 +1,16 @@
+@echo off
+setlocal
+
+rem GStreamer device names are UTF-8. Keep cmd.exe in the same encoding so
+rem Chinese and other non-ASCII device names render correctly.
+chcp 65001 >nul
+
+rem Development launcher: GStreamer keeps its DLLs and plugins outside the
+rem executable directory. This makes an in-tree build runnable without
+rem modifying the user's global PATH.
+set "OAMR_GSTREAMER_ROOT=@GSTREAMER_RUNTIME_ROOT@"
+set "PATH=%OAMR_GSTREAMER_ROOT%\bin;%PATH%"
+set "GST_PLUGIN_PATH_1_0=%OAMR_GSTREAMER_ROOT%\lib\gstreamer-1.0"
+
+"%~dp0oamr.exe" %*
+exit /b %ERRORLEVEL%
