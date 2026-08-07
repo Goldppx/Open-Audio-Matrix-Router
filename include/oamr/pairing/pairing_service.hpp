@@ -58,6 +58,7 @@ public:
     [[nodiscard]] std::string create_pair_code();
     /** Calls a remote pairing port with its current one-time code. */
     bool pair_remote(const std::string& host, std::uint16_t port, const std::string& alias, const std::string& code);
+    bool set_peer_alias(const std::string& node_id, std::string alias);
     [[nodiscard]] std::vector<RemotePeer> peers() const;
 
 private:

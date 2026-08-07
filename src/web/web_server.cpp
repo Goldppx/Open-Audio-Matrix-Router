@@ -9,6 +9,8 @@
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <functional>
+#include <memory>
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
@@ -109,20 +111,21 @@ const char* kPairControlPage = R"HTML(
 <section class=card><h2>同步正在播放的声音</h2><p class=muted>把一个耳机或扬声器的系统播放同步到另一个输出。</p><label>正在播放到</label><select id=playing></select><label>同步播放到</label><select id=target></select><button onclick=mirror()>启动同步播放</button></section>
 <section class=card><h2>发送到局域网</h2><p class=muted>向目标机器的 UDP 音频端口发送 RTP/Opus。</p><label>音频来源</label><select id=networkSource></select><div class=row><div><label>IP / 主机名</label><input id=sendHost value=127.0.0.1></div><div><label>UDP 端口</label><input id=sendPort type=number value=5004></div></div><div class=row><div><label>音质</label><select id=sendQuality><option value=low>低</option><option value=medium selected>中</option><option value=high>高</option></select></div><div><label>最大延迟</label><select id=sendLatency><option>40</option><option>60</option><option selected>100</option><option>150</option></select></div></div><label>模式</label><select id=sendMode><option value=stable>稳定</option><option value=auto selected>自动</option><option value=low-latency>低延迟</option></select><button onclick=networkStart('send')>启动发送</button></section>
 <section class=card><h2>从局域网接收</h2><p class=muted>在本机 UDP 端口接收 RTP/Opus 并播放。</p><label>播放到</label><select id=receiveSink></select><div class=row><div><label>UDP 端口</label><input id=receivePort type=number value=5004></div><div><label>音质</label><select id=receiveQuality><option value=low>低</option><option value=medium selected>中</option><option value=high>高</option></select></div></div><div class=row><div><label>最大延迟</label><select id=receiveLatency><option>40</option><option>60</option><option selected>100</option><option>150</option></select></div><div><label>模式</label><select id=receiveMode><option value=stable>稳定</option><option value=auto selected>自动</option><option value=low-latency>低延迟</option></select></div></div><button onclick=networkStart('receive')>启动接收</button></section>
-<section class=card><h2>当前路由</h2><p class=muted>当前 MVP 同时运行一条活动音频路由。配对信息与设备开放列表不会受停止影响。</p><p id=status>正在加载设备…</p><button class=secondary onclick=stopRoute()>停止当前音频路由</button></section>
-<section class="card wide"><h2>设备配对</h2><p class=muted>先在要被配对的机器生成一次性代码；再在本机填入那台机器的 IP、TCP 端口和代码。代码十分钟有效，使用一次即失效。</p><div class=row><div><label>本机别名</label><input id=localAlias value="This computer"></div><div><label>配对控制端口</label><input value=8791 disabled></div></div><label>允许已配对机器看到的本机设备</label><div id=exposure class=expose></div><button onclick=savePairProfile()>保存本机开放设备</button><div class=row><div><label>一次性配对代码</label><code id=pairCode>------</code><button class=secondary onclick=newCode()>生成新代码</button></div><div><label>配对另一台机器</label><input id=peerHost placeholder="192.168.31.100"><div class=row><input id=peerPort type=number value=8791><input id=peerAlias placeholder="别名，例如 客厅电脑"></div><input id=peerCode placeholder="对方显示的六位代码"><button onclick=pairRemote()>开始配对</button></div></div></section>
+<section class=card><h2>路由表</h2><p class=muted>每条线路独立运行。可单独暂停、恢复或删除。</p><div id=routeTable class=muted>暂无路由。</div><button class=secondary onclick=stopRoute()>停止并清空所有路由</button></section>
+<section class="card wide"><h2>运行日志</h2><pre id=status class=muted>正在加载设备…</pre></section>
+<section class="card wide"><h2>设备配对</h2><p class=muted>先在要被配对的机器生成一次性代码；再在本机填入那台机器的 IP、TCP 端口和代码。代码十分钟有效，使用一次即失效。</p><div class=row><div><label>本机别名</label><input id=localAlias></div><div><label>配对控制端口</label><input value=8791 disabled></div></div><label>允许已配对机器看到的本机设备</label><div id=exposure class=expose></div><button onclick=savePairProfile()>保存本机开放设备</button><div class=row><div><label>一次性配对代码</label><code id=pairCode>------</code><button class=secondary onclick=newCode()>生成新代码</button></div><div><label>配对另一台机器</label><input id=peerHost placeholder="192.168.31.100"><div class=row><input id=peerPort type=number value=8791><input id=peerAlias placeholder="别名，例如 客厅电脑"></div><input id=peerCode placeholder="对方显示的六位代码"><button onclick=pairRemote()>开始配对</button></div></div></section>
 <section class="card wide"><h2>已配对设备与传输遥测</h2><p class=muted>目录与遥测会在保存开放设备、改别名、开始或停止网络流后同步；此区域也每五秒刷新一次。</p><div id=peers class=muted>尚未配对设备。</div></section>
-<details class="card wide"><summary><b>高级本地矩阵</b></summary><p class=muted>系统播放是输出设备的回采；相同设备的回采不可写回自身以防回授。已配对的远端设备显示在上方目录，网络路由通过 RTP 卡片启动。</p><div id=matrix class=matrix></div><button onclick=applyMatrix()>应用本地矩阵</button></details>
+<details class="card wide"><summary><b>高级矩阵</b></summary><p class=muted>本机设备可直接形成本地矩阵；已配对的远端设备也显示在行列中，标记为“网络路由”并通过上方 RTP 卡片创建线路。</p><div id=matrix class=matrix></div><button onclick=applyMatrix()>添加本地矩阵线路</button></details>
 </div></main><script>
-let data;const status=x=>document.querySelector('#status').textContent=x,esc=x=>String(x).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let data,peerData=[];const status=x=>document.querySelector('#status').textContent=x,esc=x=>String(x).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function opt(x){return '<option value="'+encodeURIComponent(x.id)+'">'+esc(x.name)+'</option>'}function srcopt(x){return '<option data-loopback="'+x.renderLoopback+'" value="'+encodeURIComponent(x.id)+'">'+esc(x.name)+'</option>'}
-async function load(){data=await fetch('/api/devices').then(x=>x.json());playing.innerHTML=data.renderSources.map(opt).join('');target.innerHTML=data.sinks.map(opt).join('');networkSource.innerHTML=data.sources.map(srcopt).join('');receiveSink.innerHTML=data.sinks.map(opt).join('');exposure.innerHTML=data.sources.map(x=>'<label><input type=checkbox data-e="S" value="'+encodeURIComponent(x.id)+'">来源 · '+esc(x.name)+'</label>').join('')+data.sinks.map(x=>'<label><input type=checkbox data-e="K" value="'+encodeURIComponent(x.id)+'">输出 · '+esc(x.name)+'</label>').join('');renderMatrix();await loadPeers();status('设备已就绪。')}
-function renderMatrix(){let h='<table><tr><th>来源 \\ 播放目标</th>'+data.sinks.map(x=>'<th>'+esc(x.name)+'</th>').join('')+'</tr>';h+=data.sources.map(a=>'<tr><th>'+esc(a.name)+'</th>'+data.sinks.map(b=>a.renderLoopback&&a.endpoint===b.endpoint?'<td class=disabled>禁用</td>':'<td><input type=checkbox data-source="'+encodeURIComponent(a.id)+'" data-loopback="'+a.renderLoopback+'" data-sink="'+encodeURIComponent(b.id)+'"></td>').join('')+'</tr>').join('')+'</table>';matrix.innerHTML=h}
-async function post(path){const t=await fetch(path,{method:'POST'}).then(x=>x.text());status(t);return t}function mirror(){let p=decodeURIComponent(playing.value),t=decodeURIComponent(target.value);if(!p||!t||p===t)return status('请选择不同的播放目标。');post('/api/mirror?source='+encodeURIComponent(p)+'&sink='+encodeURIComponent(t))}
+async function load(){data=await fetch('/api/devices').then(x=>x.json());let local=await fetch('/api/pair/local').then(x=>x.json());localAlias.value=local.alias;playing.innerHTML=data.renderSources.map(opt).join('');target.innerHTML=data.sinks.map(opt).join('');networkSource.innerHTML=data.sources.map(srcopt).join('');receiveSink.innerHTML=data.sinks.map(opt).join('');exposure.innerHTML=data.sources.map(x=>'<label><input type=checkbox data-e="S" value="'+encodeURIComponent(x.id)+'">来源 · '+esc(x.name)+'</label>').join('')+data.sinks.map(x=>'<label><input type=checkbox data-e="K" value="'+encodeURIComponent(x.id)+'">输出 · '+esc(x.name)+'</label>').join('');await loadPeers();await loadRoutes();status('设备已就绪。')}
+function renderMatrix(){let rs=peerData.flatMap(p=>p.endpoints.filter(e=>e.direction==='source').map(e=>({name:p.alias+' · '+e.name,remote:true}))),rk=peerData.flatMap(p=>p.endpoints.filter(e=>e.direction==='sink').map(e=>({name:p.alias+' · '+e.name,remote:true}))),sources=[...data.sources,...rs],sinks=[...data.sinks,...rk];let h='<table><tr><th>来源 \\ 播放目标</th>'+sinks.map(x=>'<th>'+esc(x.name)+(x.remote?' <small>网络</small>':'')+'</th>').join('')+'</tr>';h+=sources.map(a=>'<tr><th>'+esc(a.name)+(a.remote?' <small>网络</small>':'')+'</th>'+sinks.map(b=>a.remote||b.remote?'<td class=disabled>网络路由</td>':a.renderLoopback&&a.endpoint===b.endpoint?'<td class=disabled>禁用</td>':'<td><input type=checkbox data-source="'+encodeURIComponent(a.id)+'" data-loopback="'+a.renderLoopback+'" data-sink="'+encodeURIComponent(b.id)+'"></td>').join('')+'</tr>').join('')+'</table>';matrix.innerHTML=h}
+async function post(path){const t=await fetch(path,{method:'POST'}).then(x=>x.text());status(t);await loadRoutes();return t}function mirror(){let p=decodeURIComponent(playing.value),t=decodeURIComponent(target.value);if(!p||!t||p===t)return status('请选择不同的播放目标。');post('/api/mirror?source='+encodeURIComponent(p)+'&sink='+encodeURIComponent(t))}
 function networkStart(kind){let pre=kind==='send'?'send':'receive',q='quality='+encodeURIComponent(document.querySelector('#'+pre+'Quality').value)+'&max-latency-ms='+document.querySelector('#'+pre+'Latency').value+'&mode='+encodeURIComponent(document.querySelector('#'+pre+'Mode').value);if(kind==='send'){let s=networkSource.selectedOptions[0];q+='&source='+encodeURIComponent(decodeURIComponent(s.value))+'&loopback='+s.dataset.loopback+'&host='+encodeURIComponent(sendHost.value)+'&port='+sendPort.value}else q+='&sink='+encodeURIComponent(decodeURIComponent(receiveSink.value))+'&port='+receivePort.value;post('/api/network/'+kind+'?'+q)}
 function applyMatrix(){let r=[...matrix.querySelectorAll('input:checked')].map(x=>decodeURIComponent(x.dataset.source)+'\\t'+x.dataset.loopback+'\\t'+decodeURIComponent(x.dataset.sink)).join('\\n');if(!r)return status('请至少选择一条本地路由。');post('/api/matrix?routes='+encodeURIComponent(r))}function stopRoute(){post('/api/stop')}
-async function savePairProfile(){let e=[...exposure.querySelectorAll('input:checked')].map(x=>x.dataset.e+'\\t'+decodeURIComponent(x.value)+'\\t'+x.parentElement.textContent.trim()).join('\\n');await post('/api/pair/config?alias='+encodeURIComponent(localAlias.value.trim()||'This computer')+'&endpoints='+encodeURIComponent(e));await loadPeers()}async function newCode(){pairCode.textContent=await fetch('/api/pair/code').then(x=>x.text());status('一次性配对代码已生成；十分钟内有效。')}async function pairRemote(){let r=await post('/api/pair/connect?host='+encodeURIComponent(peerHost.value.trim())+'&port='+encodeURIComponent(peerPort.value)+'&alias='+encodeURIComponent(peerAlias.value.trim()||peerHost.value.trim())+'&code='+encodeURIComponent(peerCode.value.trim()));if(r.startsWith('Pairing succeeded'))await loadPeers()}async function loadPeers(){let peerData=await fetch('/api/pair/peers').then(x=>x.json());document.querySelector('#peers').innerHTML=peerData.length?peerData.map(p=>{let t=p.telemetry||{},line=t.deviceName?'音质 '+esc(t.quality)+' · 目标延迟 '+t.latencyMs+' ms · 丢包 '+t.packetLossPercent+'% · 设备 '+esc(t.deviceName):'当前未传输音频';return '<div class=peer><b>'+esc(p.alias)+'</b> <span class=muted>'+esc(p.host)+':'+p.port+'</span><br><span class=badge>'+line+'</span><br>'+ (p.endpoints.length?p.endpoints.map(e=>'<span class=badge>'+ (e.direction==='source'?'来源':'输出')+' · '+esc(e.name)+'</span>').join(' '):'<span class=muted>对方未开放设备</span>')+'</div>'}).join(''):'尚未配对设备。'}
-load().then(()=>setInterval(()=>loadPeers().catch(()=>{}),5000)).catch(e=>status('Error: '+e));
+async function savePairProfile(){let e=[...exposure.querySelectorAll('input:checked')].map(x=>x.dataset.e+'\\t'+decodeURIComponent(x.value)+'\\t'+x.parentElement.textContent.trim()).join('\\n');await post('/api/pair/config?alias='+encodeURIComponent(localAlias.value.trim()||'This computer')+'&endpoints='+encodeURIComponent(e));await loadPeers()}async function newCode(){pairCode.textContent=await fetch('/api/pair/code').then(x=>x.text());status('一次性配对代码已生成；十分钟内有效。')}async function pairRemote(){let r=await post('/api/pair/connect?host='+encodeURIComponent(peerHost.value.trim())+'&port='+encodeURIComponent(peerPort.value)+'&alias='+encodeURIComponent(peerAlias.value.trim()||peerHost.value.trim())+'&code='+encodeURIComponent(peerCode.value.trim()));if(r.startsWith('Pairing succeeded'))await loadPeers()}async function renamePeer(node,old){let alias=prompt('远程设备别名',old);if(alias&&alias!==old){await post('/api/pair/alias?node='+encodeURIComponent(node)+'&alias='+encodeURIComponent(alias));await loadPeers()}}async function loadPeers(){peerData=await fetch('/api/pair/peers').then(x=>x.json());document.querySelector('#peers').innerHTML=peerData.length?peerData.map(p=>{let t=p.telemetry||{},line=t.deviceName?'音质 '+esc(t.quality)+' · 目标延迟 '+t.latencyMs+' ms · 丢包 '+t.packetLossPercent+'% · 设备 '+esc(t.deviceName):'当前未传输音频';return '<div class=peer><b><a href=# onclick="renamePeer(\\''+esc(p.nodeId)+'\\',\\''+esc(p.alias)+'\\');return false">'+esc(p.alias)+'</a></b> <span class=muted>'+esc(p.host)+':'+p.port+'</span><br><span class=badge>'+line+'</span><br>'+ (p.endpoints.length?p.endpoints.map(e=>'<span class=badge>'+ (e.direction==='source'?'来源':'输出')+' · '+esc(e.name)+'</span>').join(' '):'<span class=muted>对方未开放设备</span>')+'</div>'}).join(''):'尚未配对设备。';renderMatrix()}async function loadRoutes(){let r=await fetch('/api/routes').then(x=>x.json());routeTable.innerHTML=r.length?r.map(x=>'<div class=peer><b>'+esc(x.label)+'</b> <span class=badge>'+ (x.enabled?'运行中':'已暂停')+'</span><button class=secondary onclick="post(\\'/api/routes/'+x.id+'/toggle?enabled='+(x.enabled?'false':'true')+'\\')">'+(x.enabled?'暂停':'恢复')+'</button> <button class=secondary onclick="post(\\'/api/routes/'+x.id+'/delete\\')">删除</button></div>').join(''):'暂无路由。'}
+load().then(()=>setInterval(()=>{loadPeers().catch(()=>{});loadRoutes().catch(()=>{})},5000)).catch(e=>status('Error: '+e));
 </script></html>)HTML";
 
 bool is_default_device(const std::string& name) { return name.rfind("Default Audio ", 0) == 0; }
@@ -167,10 +170,39 @@ std::string quality_name(gstreamer::AudioQuality quality) {
 
 class WebServer::Impl {
 public:
+    struct ActiveRoute {
+        std::size_t id{};
+        std::string label;
+        bool enabled{true};
+        std::function<bool(gstreamer::RtpOpusPipeline&)> starter;
+        std::unique_ptr<gstreamer::RtpOpusPipeline> pipeline;
+    };
     std::atomic_bool stopping{false};
     std::string error;
-    gstreamer::RtpOpusPipeline route;
+    std::vector<ActiveRoute> routes;
+    std::size_t next_route_id{1};
     pairing::PairingService pairing;
+
+    bool add_route(std::string label, std::function<bool(gstreamer::RtpOpusPipeline&)> starter) {
+        auto pipeline = std::make_unique<gstreamer::RtpOpusPipeline>();
+        if (!starter(*pipeline)) { error = pipeline->last_error(); return false; }
+        routes.push_back({next_route_id++, std::move(label), true, std::move(starter), std::move(pipeline)});
+        return true;
+    }
+    bool set_route_enabled(std::size_t id, bool enable) {
+        for (auto& item : routes) if (item.id == id) {
+            if (enable && !item.enabled) { item.pipeline = std::make_unique<gstreamer::RtpOpusPipeline>(); if (!item.starter(*item.pipeline)) { error = item.pipeline->last_error(); item.pipeline.reset(); return false; } }
+            if (!enable && item.enabled && item.pipeline) item.pipeline->stop();
+            item.enabled = enable; return true;
+        }
+        return false;
+    }
+    bool erase_route(std::size_t id) {
+        const auto old_size = routes.size();
+        routes.erase(std::remove_if(routes.begin(), routes.end(), [id](const ActiveRoute& item) { return item.id == id; }), routes.end());
+        return routes.size() != old_size;
+    }
+    void stop_all_routes() { for (auto& item : routes) if (item.pipeline) item.pipeline->stop(); routes.clear(); }
 
     std::string devices_json() {
         gstreamer::DeviceEnumerator enumerator;
@@ -219,10 +251,16 @@ public:
     std::string handle(const std::string& method, const std::string& target, std::string& type) {
         type = "text/plain; charset=utf-8";
         if (method == "GET" && target.rfind("/api/devices", 0) == 0) { type = "application/json; charset=utf-8"; return devices_json(); }
+        if (method == "GET" && target.rfind("/api/routes", 0) == 0) {
+            type = "application/json; charset=utf-8"; std::ostringstream out; out << '['; bool first = true;
+            for (const auto& item : routes) { if (!first) out << ','; first = false; out << "{\"id\":" << item.id << ",\"label\":\"" << json_escape(item.label) << "\",\"enabled\":" << (item.enabled ? "true" : "false") << "}"; }
+            return out << ']', out.str();
+        }
         if (method == "GET" && target.rfind("/api/pair/code", 0) == 0) return pairing.create_pair_code();
+        if (method == "GET" && target.rfind("/api/pair/local", 0) == 0) { type = "application/json; charset=utf-8"; return "{\"alias\":\"" + json_escape(pairing.local_alias()) + "\"}"; }
         if (method == "GET" && target.rfind("/api/pair/peers", 0) == 0) {
             type = "application/json; charset=utf-8"; std::ostringstream out; out << '['; bool first = true;
-            for (const auto& peer : pairing.peers()) { if (!first) out << ','; first = false; out << "{\"alias\":\"" << json_escape(peer.alias) << "\",\"host\":\"" << json_escape(peer.host) << "\",\"port\":" << peer.port << ",\"telemetry\":{\"quality\":\"" << json_escape(peer.telemetry.quality) << "\",\"latencyMs\":" << peer.telemetry.target_latency_ms << ",\"packetLossPercent\":" << peer.telemetry.packet_loss_percent << ",\"deviceName\":\"" << json_escape(peer.telemetry.device_name) << "\"},\"endpoints\":["; bool endpoint_first = true; for (const auto& endpoint : peer.endpoints) { if (!endpoint_first) out << ','; endpoint_first = false; out << "{\"name\":\"" << json_escape(endpoint.name) << "\",\"direction\":\"" << (endpoint.direction == pairing::EndpointDirection::Source ? "source" : "sink") << "\"}"; } out << "]}"; } return out << ']', out.str();
+            for (const auto& peer : pairing.peers()) { if (!first) out << ','; first = false; out << "{\"nodeId\":\"" << json_escape(peer.node_id) << "\",\"alias\":\"" << json_escape(peer.alias) << "\",\"host\":\"" << json_escape(peer.host) << "\",\"port\":" << peer.port << ",\"telemetry\":{\"quality\":\"" << json_escape(peer.telemetry.quality) << "\",\"latencyMs\":" << peer.telemetry.target_latency_ms << ",\"packetLossPercent\":" << peer.telemetry.packet_loss_percent << ",\"deviceName\":\"" << json_escape(peer.telemetry.device_name) << "\"},\"endpoints\":["; bool endpoint_first = true; for (const auto& endpoint : peer.endpoints) { if (!endpoint_first) out << ','; endpoint_first = false; out << "{\"name\":\"" << json_escape(endpoint.name) << "\",\"direction\":\"" << (endpoint.direction == pairing::EndpointDirection::Source ? "source" : "sink") << "\"}"; } out << "]}"; } return out << ']', out.str();
         }
         if (method == "POST" && target.rfind("/api/pair/config", 0) == 0) {
             const auto query = query_params(target); const auto alias = query.find("alias"), endpoints = query.find("endpoints"); if (alias == query.end()) return "Missing local alias.";
@@ -242,20 +280,27 @@ public:
             if (pairing.pair_remote(host->second, pairing_port, alias->second, code->second)) return "Pairing succeeded.";
             return "Pairing failed: " + pairing.last_error();
         }
+        if (method == "POST" && target.rfind("/api/pair/alias", 0) == 0) {
+            const auto query = query_params(target); const auto node = query.find("node"), alias = query.find("alias");
+            if (node == query.end() || alias == query.end() || !pairing.set_peer_alias(node->second, alias->second)) return "Could not rename paired device.";
+            return "Paired device alias saved.";
+        }
         if (method == "POST" && target.rfind("/api/loopback", 0) == 0) {
             const auto params = query_params(target);
             const auto source = params.find("source"), sink = params.find("sink");
             if (source == params.end() || sink == params.end()) return "Missing Source or Sink.";
-            if (route.start_loopback({source->second, sink->second, true})) return "Local route started.";
-            return "Start failed: " + route.last_error();
+            const auto settings = gstreamer::LoopbackSettings{source->second, sink->second, true};
+            if (add_route("Local: " + source->second + " → " + sink->second, [settings](auto& route) { return route.start_loopback(settings); })) return "Local route added.";
+            return "Start failed: " + error;
         }
         if (method == "POST" && target.rfind("/api/mirror", 0) == 0) {
             const auto params = query_params(target);
             const auto source = params.find("source"), sink = params.find("sink");
             if (source == params.end() || sink == params.end()) return "Missing playback source or target.";
             if (endpoint_id(source->second) == endpoint_id(sink->second)) return "Choose a different playback target to avoid feedback.";
-            if (route.start_loopback({source->second, sink->second, true})) return "Playback mirroring started.";
-            return "Start failed: " + route.last_error();
+            const auto settings = gstreamer::LoopbackSettings{source->second, sink->second, true};
+            if (add_route("Mirror: " + source->second + " → " + sink->second, [settings](auto& route) { return route.start_loopback(settings); })) return "Playback mirroring route added.";
+            return "Start failed: " + error;
         }
         if (method == "POST" && target.rfind("/api/network/send", 0) == 0) {
             const auto params = query_params(target);
@@ -267,8 +312,8 @@ public:
             settings.host = host->second; settings.port = udp_port; settings.source_device = source->second;
             settings.capture_render_device = params.contains("loopback") && params.at("loopback") == "true";
             settings.network = profile;
-            if (route.start_sender(settings)) { pairing.set_telemetry({quality_name(profile.quality), profile.max_latency_ms, 0.0, source->second}); pairing.announce(); return "Network sender started and telemetry synchronized."; }
-            return "Sender failed: " + route.last_error();
+            if (add_route("Send: " + source->second + " → " + settings.host + ":" + std::to_string(settings.port), [settings](auto& route) { return route.start_sender(settings); })) { pairing.set_telemetry({quality_name(profile.quality), profile.max_latency_ms, 0.0, source->second}); pairing.announce(); return "Network sender route added and telemetry synchronized."; }
+            return "Sender failed: " + error;
         }
         if (method == "POST" && target.rfind("/api/network/receive", 0) == 0) {
             const auto params = query_params(target);
@@ -278,8 +323,8 @@ public:
                 || !network_profile_from(params, profile)) return "Invalid network receiver settings.";
             gstreamer::ReceiverSettings settings;
             settings.port = udp_port; settings.sink_device = sink->second; settings.network = profile;
-            if (route.start_receiver(settings)) { pairing.set_telemetry({quality_name(profile.quality), profile.max_latency_ms, 0.0, sink->second}); pairing.announce(); return "Network receiver started and telemetry synchronized."; }
-            return "Receiver failed: " + route.last_error();
+            if (add_route("Receive: :" + std::to_string(settings.port) + " → " + sink->second, [settings](auto& route) { return route.start_receiver(settings); })) { pairing.set_telemetry({quality_name(profile.quality), profile.max_latency_ms, 0.0, sink->second}); pairing.announce(); return "Network receiver route added and telemetry synchronized."; }
+            return "Receiver failed: " + error;
         }
         if (method == "POST" && target.rfind("/api/matrix", 0) == 0) {
             const auto params = query_params(target);
@@ -310,10 +355,16 @@ public:
                 if (sink_new) settings.sink_devices.push_back(sink);
                 settings.routes.push_back({source_it->second, sink_it->second});
             }
-            if (route.start_local_matrix(settings)) return "Matrix started.";
-            return "Matrix failed: " + route.last_error();
+            if (add_route("Local matrix (" + std::to_string(settings.routes.size()) + " links)", [settings](auto& route) { return route.start_local_matrix(settings); })) return "Matrix route added.";
+            return "Matrix failed: " + error;
         }
-        if (method == "POST" && target.rfind("/api/stop", 0) == 0) { route.stop(); pairing.set_telemetry({}); pairing.announce(); return "Route stopped and telemetry synchronized."; }
+        if (method == "POST" && target.rfind("/api/routes/", 0) == 0) {
+            const auto slash = target.find('/', std::string_view{"/api/routes/"}.size()); const auto id_text = target.substr(std::string_view{"/api/routes/"}.size(), slash - std::string_view{"/api/routes/"}.size()); std::size_t id{};
+            try { id = std::stoull(id_text); } catch (...) { return "Invalid route id."; }
+            if (target.find("/toggle", slash) != std::string::npos) { const auto enabled = query_params(target).contains("enabled") && query_params(target).at("enabled") == "true"; return set_route_enabled(id, enabled) ? "Route updated." : "Could not update route: " + error; }
+            if (target.find("/delete", slash) != std::string::npos) return erase_route(id) ? "Route deleted." : "Route not found.";
+        }
+        if (method == "POST" && target.rfind("/api/stop", 0) == 0) { stop_all_routes(); pairing.set_telemetry({}); pairing.announce(); return "All routes stopped and telemetry synchronized."; }
         if (method == "GET" && (target == "/" || target.rfind("/?", 0) == 0)) { type = "text/html; charset=utf-8"; return kPairControlPage; }
         return "Not found";
     }
@@ -346,7 +397,7 @@ bool WebServer::serve(std::uint16_t port) {
         std::string type; const std::string body = impl_->handle(method, target, type);
         const std::string response = "HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
         send(client, response.data(), static_cast<int>(response.size()), 0); close_socket(client);
-        if (!impl_->route.poll()) { impl_->error = impl_->route.last_error(); impl_->route.stop(); }
+        for (auto& item : impl_->routes) if (item.enabled && item.pipeline && !item.pipeline->poll()) { impl_->error = item.pipeline->last_error(); item.pipeline->stop(); item.enabled = false; }
     }
     close_socket(listener);
     impl_->pairing.stop();
@@ -356,7 +407,7 @@ bool WebServer::serve(std::uint16_t port) {
     return true;
 }
 
-void WebServer::stop() noexcept { impl_->stopping = true; impl_->route.stop(); impl_->pairing.stop(); }
+void WebServer::stop() noexcept { impl_->stopping = true; impl_->stop_all_routes(); impl_->pairing.stop(); }
 const std::string& WebServer::last_error() const noexcept { return impl_->error; }
 
 } // namespace oamr::web

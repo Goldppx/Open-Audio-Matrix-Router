@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -87,7 +88,7 @@ class PairingService::Impl {
 public:
     mutable std::mutex mutex;
     std::atomic_bool stopping{false}; std::thread worker; Socket listener{kInvalidSocket}; std::uint16_t listen_port{};
-    std::string error, node_id{random_hex(24)}, alias{"This computer"}, pair_code; std::chrono::steady_clock::time_point code_expiry{};
+    std::string error, node_id{random_hex(24)}, alias{[] { const char* name = std::getenv("COMPUTERNAME"); return name && *name ? std::string{name} : std::string{"This computer"}; }()}, pair_code; std::chrono::steady_clock::time_point code_expiry{};
     std::vector<ExposedEndpoint> exposed; AudioTelemetry local_telemetry; std::map<std::string, RemotePeer> known_peers;
 
     std::filesystem::path state_path() const { return std::filesystem::current_path() / "oamr-pairing-state.txt"; }
@@ -203,6 +204,11 @@ bool PairingService::pair_remote(const std::string& host, std::uint16_t port, co
     { std::lock_guard lock(impl_->mutex); impl_->known_peers[reply.at("node")] = {reply.at("node"), alias, host, port, deserialize(reply.contains("catalog") ? reply.at("catalog") : "")}; impl_->save_unlocked(); }
     announce();
     return true;
+}
+bool PairingService::set_peer_alias(const std::string& node_id, std::string alias) {
+    std::lock_guard lock(impl_->mutex); const auto it = impl_->known_peers.find(node_id);
+    if (it == impl_->known_peers.end() || alias.empty()) return false;
+    it->second.alias = std::move(alias); impl_->save_unlocked(); return true;
 }
 
 } // namespace oamr::pairing
