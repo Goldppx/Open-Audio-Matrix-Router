@@ -19,6 +19,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(GNUInstallDirs)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# ---------------------------------------------------------------------------
+# oamr_core: platform-neutral graph model. No audio, socket, or UI dependency.
+# ---------------------------------------------------------------------------
 add_library(oamr_core
     src/core/audio_graph.cpp
 )
@@ -37,35 +40,104 @@ else()
     target_compile_options(oamr_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# ---------------------------------------------------------------------------
+# oamr_pairing: LAN pairing control plane. No GStreamer dependency.
+# ---------------------------------------------------------------------------
+add_library(oamr_pairing
+    src/pairing/pairing_service.cpp
+)
+add_library(oamr::pairing ALIAS oamr_pairing)
+
+target_include_directories(oamr_pairing
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+target_compile_features(oamr_pairing PUBLIC cxx_std_20)
+
+if(MSVC)
+    target_compile_options(oamr_pairing PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(oamr_pairing PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+if(WIN32)
+    target_link_libraries(oamr_pairing PRIVATE ws2_32)
+endif()
+
 if(OAMR_ENABLE_GSTREAMER)
-    find_package(GStreamer 1.20 REQUIRED COMPONENTS app audio rtp)
+    # -----------------------------------------------------------------------
+    # oamr_gstreamer: concrete AudioBackend/AudioRoute implementation.
+    # Public consumers only include oamr/audio/*; the classes in src/gstreamer
+    # are internal implementation details and must not leak upward.
+    # -----------------------------------------------------------------------
+    find_package(GStreamer 1.20 REQUIRED COMPONENTS audio rtp)
 
     add_library(oamr_gstreamer
         src/gstreamer/device_enumerator.cpp
-        src/gstreamer/local_router_engine.cpp
         src/gstreamer/rtp_opus_pipeline.cpp
-        src/pairing/pairing_service.cpp
-        src/web/web_server.cpp
+        src/gstreamer/audio_backend.cpp
     )
     add_library(oamr::gstreamer ALIAS oamr_gstreamer)
-    target_link_libraries(oamr_gstreamer PUBLIC oamr::core GStreamer::gstreamer GStreamer::app GStreamer::audio GStreamer::rtp)
-    target_include_directories(oamr_gstreamer PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+    target_link_libraries(oamr_gstreamer
+        PUBLIC oamr::core GStreamer::gstreamer GStreamer::audio GStreamer::rtp)
+    target_include_directories(oamr_gstreamer
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/gstreamer)
     target_compile_features(oamr_gstreamer PUBLIC cxx_std_20)
+
     if(MSVC)
-        target_compile_options(oamr_gstreamer PRIVATE /utf-8)
-    endif()
-    if(WIN32)
-        target_link_libraries(oamr_gstreamer PRIVATE ws2_32)
+        target_compile_options(oamr_gstreamer PRIVATE /W4 /permissive- /utf-8)
+    else()
+        target_compile_options(oamr_gstreamer PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 
+    # -----------------------------------------------------------------------
+    # oamr_web: local-only web UI. Depends on the pairing service and the
+    # backend factory, never on backend-internal headers.
+    # -----------------------------------------------------------------------
+    add_library(oamr_web
+        src/web/web_server.cpp
+    )
+    add_library(oamr::web ALIAS oamr_web)
+
+    target_link_libraries(oamr_web PRIVATE oamr::pairing oamr::gstreamer)
+    target_include_directories(oamr_web
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_compile_features(oamr_web PUBLIC cxx_std_20)
+
+    if(MSVC)
+        target_compile_options(oamr_web PRIVATE /W4 /permissive- /utf-8)
+    else()
+        target_compile_options(oamr_web PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    if(WIN32)
+        target_link_libraries(oamr_web PRIVATE ws2_32)
+    endif()
+
+    # -----------------------------------------------------------------------
+    # oamr: command-line entry point.
+    # -----------------------------------------------------------------------
     add_executable(oamr apps/oamr/main.cpp)
-    target_link_libraries(oamr PRIVATE oamr::gstreamer)
+    target_link_libraries(oamr PRIVATE oamr::web oamr::pairing oamr::gstreamer)
+
+    if(MSVC)
+        target_compile_options(oamr PRIVATE /W4 /permissive- /utf-8)
+    else()
+        target_compile_options(oamr PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
 
     if(WIN32 AND DEFINED GSTREAMER_RUNTIME_ROOT)
         configure_file(apps/oamr/run-oamr.cmd.in "${CMAKE_CURRENT_BINARY_DIR}/run-oamr.cmd" @ONLY)
     endif()
 else()
-    message(STATUS "OAMR_ENABLE_GSTREAMER=OFF: only the platform-neutral core will be built")
+    message(STATUS "OAMR_ENABLE_GSTREAMER=OFF: only platform-neutral core and pairing will be built")
 endif()
 
 if(OAMR_BUILD_TESTS)
@@ -88,7 +160,7 @@ if(OAMR_BUILD_TESTS)
     endif()
 endif()
 
-install(TARGETS oamr_core
+install(TARGETS oamr_core oamr_pairing
     EXPORT OAMRTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -96,7 +168,7 @@ install(TARGETS oamr_core
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 if(OAMR_ENABLE_GSTREAMER)
-    install(TARGETS oamr_gstreamer oamr
+    install(TARGETS oamr_gstreamer oamr_web oamr
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
