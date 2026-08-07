@@ -30,7 +30,9 @@ std::string sender_description(const SenderSettings& settings) {
     pipeline << selected.factory << " name=source";
     if (settings.capture_render_device && selected.factory == "wasapi2src")
         pipeline << " loopback=true low-latency=true";
-    pipeline << " ! audioconvert ! audioresample ! "
+    // The second converter is required after resampling: resampling changes
+    // rate, not sample representation, and opusenc requires S16LE.
+    pipeline << " ! audioconvert ! audioresample ! audioconvert ! "
              << "audio/x-raw,format=S16LE,rate=" << settings.pcm.sample_rate << ",channels=" << settings.pcm.channels
              << " ! opusenc bitrate=" << network.opus_bitrate_bps << " frame-size=" << network.opus_frame_ms
              << " inband-fec=" << (network.inband_fec ? "true" : "false")
@@ -49,9 +51,11 @@ std::string receiver_description(const ReceiverSettings& settings) {
              << "! rtpjitterbuffer latency=" << network.jitter_buffer_ms
              << " drop-on-latency=" << (network.drop_on_latency ? "true" : "false")
              << " do-lost=true"
-             << " ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! "
-             << "audio/x-raw,rate=" << settings.pcm.sample_rate << ",channels=" << settings.pcm.channels
-             << " ! " << selected.factory << " name=sink sync=true";
+             << " ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! audioconvert ! "
+             // Do not impose the network's PCM caps on a physical sink. The
+             // final converter lets each Windows device negotiate its native
+             // rate, channel count and sample representation.
+             << selected.factory << " name=sink sync=true";
     return pipeline.str();
 }
 
@@ -64,21 +68,18 @@ std::string loopback_description(const LoopbackSettings& settings) {
     // remains opt-in so ordinary microphone capture keeps working unchanged.
     if (settings.capture_render_device && source.factory == "wasapi2src")
         pipeline << " loopback=true low-latency=true";
-    pipeline << " ! audioconvert ! audioresample ! "
-             << "audio/x-raw,rate=" << settings.pcm.sample_rate << ",channels=" << settings.pcm.channels
-             << " ! " << sink.factory << " name=sink sync=true";
+    pipeline << " ! audioconvert ! audioresample ! audioconvert ! "
+             << sink.factory << " name=sink sync=true";
     return pipeline.str();
 }
 
 std::string fanout_description(const LocalFanoutSettings& settings) {
     const DeviceSelector source = parse_selector(settings.source_device, "autoaudiosrc");
     std::ostringstream pipeline;
-    pipeline << source.factory << " name=source ! audioconvert ! audioresample ! "
-             << "audio/x-raw,rate=" << settings.pcm.sample_rate << ",channels=" << settings.pcm.channels
-             << " ! tee name=router ";
+    pipeline << source.factory << " name=source ! audioconvert ! audioresample ! tee name=router ";
     for (std::size_t index = 0; index < settings.sink_devices.size(); ++index) {
         const DeviceSelector sink = parse_selector(settings.sink_devices[index], "autoaudiosink");
-        pipeline << "router. ! queue ! " << sink.factory << " name=sink" << index << " sync=true ";
+        pipeline << "router. ! queue ! audioconvert ! audioresample ! " << sink.factory << " name=sink" << index << " sync=true ";
     }
     return pipeline.str();
 }
@@ -92,15 +93,13 @@ std::string matrix_description(const LocalMatrixSettings& settings) {
             && settings.source_is_render_loopback[source]
             && selected.factory == "wasapi2src")
             pipeline << " loopback=true low-latency=true";
-        pipeline << " ! audioconvert ! audioresample ! "
-                 << "audio/x-raw,rate=" << settings.pcm.sample_rate << ",channels=" << settings.pcm.channels
-                 << " ! tee name=split" << source << ' ';
+        pipeline << " ! audioconvert ! audioresample ! tee name=split" << source << ' ';
     }
     for (const auto& route : settings.routes)
         pipeline << "split" << route.source_index << ". ! queue ! mix" << route.sink_index << ". ";
     for (std::size_t sink = 0; sink < settings.sink_devices.size(); ++sink) {
         const auto selected = parse_selector(settings.sink_devices[sink], "autoaudiosink");
-        pipeline << "audiomixer name=mix" << sink << " ! audioconvert ! audioresample ! "
+        pipeline << "audiomixer name=mix" << sink << " ! audioconvert ! audioresample ! audioconvert ! "
                  << selected.factory << " name=sink" << sink << " sync=true ";
     }
     return pipeline.str();
@@ -147,8 +146,11 @@ public:
         }
         if (state_result == GST_STATE_CHANGE_ASYNC) {
             const GstStateChangeReturn wait_result = gst_element_get_state(pipeline, nullptr, nullptr, 5 * GST_SECOND);
-            if ((wait_result != GST_STATE_CHANGE_SUCCESS && wait_result != GST_STATE_CHANGE_NO_PREROLL) || !poll()) {
-                if (error.empty()) error = "GStreamer did not reach PLAYING state within five seconds.";
+            // A UDP receiver may remain asynchronous until its first RTP
+            // packet arrives. Keep it alive unless the bus reports a real
+            // device/negotiation failure.
+            if (wait_result == GST_STATE_CHANGE_FAILURE || !poll()) {
+                if (error.empty()) error = "GStreamer could not start the pipeline.";
                 stop();
                 return false;
             }
