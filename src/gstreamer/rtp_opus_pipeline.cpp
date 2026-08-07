@@ -33,15 +33,12 @@ std::string sender_description(const SenderSettings& settings) {
     // The second converter is required after resampling: resampling changes
     // rate, not sample representation, and opusenc requires S16LE.
     pipeline << " ! audioconvert name=sender_convert_input ! audioresample name=sender_resample ! "
-             << "audioconvert name=sender_convert_opus ! "
-             // Give opusenc a fully fixed raw-audio format.  Some WASAPI
-             // endpoints expose their channel count only after PLAYING; a
-             // channel-unspecified caps filter then cannot link statically to
-             // opusenc. audioconvert performs the required mono/5.1→stereo
-             // conversion before this point.
-             << "audio/x-raw,format=S16LE,layout=interleaved,rate=" << settings.pcm.sample_rate
-             << ",channels=" << settings.pcm.channels
-             << " ! opusenc name=opus_encoder bitrate=" << network.opus_bitrate_bps << " frame-size=" << network.opus_frame_ms
+             // Keep caps off the parse-launch link. WASAPI often reports its
+             // complete layout only after the device starts; setting the named
+             // capsfilter programmatically before PLAYING avoids a premature
+             // parser link failure with opusenc on affected Windows devices.
+             << "audioconvert name=sender_convert_opus ! capsfilter name=sender_pcm_caps ! "
+             << "opusenc name=opus_encoder bitrate=" << network.opus_bitrate_bps << " frame-size=" << network.opus_frame_ms
              << " inband-fec=" << (network.inband_fec ? "true" : "false")
              << " packet-loss-percentage=" << (network.inband_fec ? 3 : 0)
              << " ! rtpopuspay name=rtp_opus_payloader pt=96 ! "
@@ -134,7 +131,7 @@ public:
 
     struct DeviceBinding { std::string element_name; std::string device; };
 
-    bool start(const std::string& description, const std::vector<DeviceBinding>& devices) {
+    bool start(const std::string& description, const std::vector<DeviceBinding>& devices, const PcmSettings* sender_pcm = nullptr) {
         stop();
         GError* parse_error = nullptr;
         pipeline = gst_parse_launch(description.c_str(), &parse_error);
@@ -146,6 +143,12 @@ public:
         }
         for (const auto& binding : devices)
             set_device_if_supported(pipeline, binding.element_name.c_str(), binding.device);
+        if (sender_pcm != nullptr) {
+            GstElement* filter = gst_bin_get_by_name(GST_BIN(pipeline), "sender_pcm_caps");
+            if (filter == nullptr) { error = "Could not configure Opus PCM caps filter."; stop(); return false; }
+            GstCaps* caps = gst_caps_new_simple("audio/x-raw", "format", G_TYPE_STRING, "S16LE", "layout", G_TYPE_STRING, "interleaved", "rate", G_TYPE_INT, static_cast<int>(sender_pcm->sample_rate), "channels", G_TYPE_INT, static_cast<int>(sender_pcm->channels), nullptr);
+            g_object_set(filter, "caps", caps, nullptr); gst_caps_unref(caps); gst_object_unref(filter);
+        }
         bus = gst_element_get_bus(pipeline);
         const GstStateChangeReturn state_result = gst_element_set_state(pipeline, GST_STATE_PLAYING);
         if (state_result == GST_STATE_CHANGE_FAILURE) {
@@ -213,7 +216,8 @@ bool RtpOpusPipeline::start_sender(const SenderSettings& settings) {
         impl_->error = "Sender requires a host, non-zero port, and valid Opus PCM settings.";
         return false;
     }
-    const bool started = impl_->start(sender_description(settings), parse_selector(settings.source_device, "autoaudiosrc").device, "source");
+    const std::vector<Impl::DeviceBinding> devices{{"source", parse_selector(settings.source_device, "autoaudiosrc").device}};
+    const bool started = impl_->start(sender_description(settings), devices, &settings.pcm);
     if (started) impl_->network_profile = network;
     return started;
 }
