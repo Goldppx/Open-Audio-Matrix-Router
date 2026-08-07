@@ -131,7 +131,7 @@ public:
         GError* parse_error = nullptr;
         pipeline = gst_parse_launch(description.c_str(), &parse_error);
         if (parse_error != nullptr) {
-            error = parse_error->message;
+            error = std::string(parse_error->message) + "\nPipeline: " + description;
             g_error_free(parse_error);
             pipeline = nullptr;
             return false;

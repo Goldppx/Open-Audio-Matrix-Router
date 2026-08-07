@@ -73,6 +73,17 @@ if(OAMR_BUILD_TESTS)
         add_executable(oamr_core_tests tests/audio_graph_tests.cpp)
         target_link_libraries(oamr_core_tests PRIVATE oamr::core)
         add_test(NAME oamr_core_tests COMMAND oamr_core_tests)
+        if(OAMR_ENABLE_GSTREAMER)
+            add_executable(oamr_gstreamer_smoke_tests tests/gstreamer_smoke_tests.cpp)
+            target_link_libraries(oamr_gstreamer_smoke_tests PRIVATE oamr::gstreamer)
+            add_test(NAME oamr_gstreamer_smoke_tests COMMAND oamr_gstreamer_smoke_tests)
+            if(WIN32 AND DEFINED GSTREAMER_RUNTIME_ROOT)
+                # CTest bypasses run-oamr.cmd, so provide the same runtime
+                # loader and plugin paths used by the portable package.
+                set_tests_properties(oamr_gstreamer_smoke_tests PROPERTIES ENVIRONMENT
+                    "PATH=${GSTREAMER_RUNTIME_ROOT}/bin\;$ENV{PATH};GST_PLUGIN_PATH_1_0=${GSTREAMER_RUNTIME_ROOT}/lib/gstreamer-1.0;GST_PLUGIN_SYSTEM_PATH_1_0=${GSTREAMER_RUNTIME_ROOT}/lib/gstreamer-1.0;GST_PLUGIN_SCANNER=${GSTREAMER_RUNTIME_ROOT}/libexec/gstreamer-1.0/gst-plugin-scanner.exe")
+            endif()
+        endif()
     endif()
 endif()
 
