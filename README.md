@@ -93,6 +93,8 @@ WASAPI source ─► convert/resample ─► Opus/RTP/UDP ─► jitter buffer �
 - `scripts`: portable runtime packaging and one-command build workflow.
 
 More detail is in [docs/architecture.md](docs/architecture.md).
+For a handoff-ready Linux implementation plan, see
+[docs/linux-porting-guide.md](docs/linux-porting-guide.md).
 
 ## License
 
