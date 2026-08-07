@@ -1,0 +1,24 @@
+# CMake build trees
+/build/
+/build-*/
+/out/
+/dist/
+/CMakeCache.txt
+/CMakeFiles/
+/Testing/
+
+# IDE and compiler artifacts
+/.vs/
+/.vscode/
+*.user
+*.suo
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.so
+*.dylib
+
+# GStreamer diagnostic output
+*.dot
