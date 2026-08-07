@@ -60,7 +60,7 @@ try {
         Copy-Item -LiteralPath $source -Destination $runtimeBin
     }
     foreach ($name in @(
-        "gstwasapi2.dll", "gstaudioconvert.dll", "gstaudioresample.dll",
+        "gstcoreelements.dll", "gstwasapi2.dll", "gstaudioconvert.dll", "gstaudioresample.dll",
         "gstaudiomixer.dll", "gstopus.dll", "gstrtp.dll",
         "gstrtpmanager.dll", "gstudp.dll", "gstautodetect.dll"
     )) {
