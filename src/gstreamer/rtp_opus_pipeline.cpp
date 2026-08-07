@@ -34,9 +34,13 @@ std::string sender_description(const SenderSettings& settings) {
     // rate, not sample representation, and opusenc requires S16LE.
     pipeline << " ! audioconvert name=sender_convert_input ! audioresample name=sender_resample ! "
              << "audioconvert name=sender_convert_opus ! "
-             // Do not force a channel count here. Real capture devices may be
-             // mono or stereo; Opus and rtpopuspay carry that information.
+             // Give opusenc a fully fixed raw-audio format.  Some WASAPI
+             // endpoints expose their channel count only after PLAYING; a
+             // channel-unspecified caps filter then cannot link statically to
+             // opusenc. audioconvert performs the required mono/5.1→stereo
+             // conversion before this point.
              << "audio/x-raw,format=S16LE,layout=interleaved,rate=" << settings.pcm.sample_rate
+             << ",channels=" << settings.pcm.channels
              << " ! opusenc name=opus_encoder bitrate=" << network.opus_bitrate_bps << " frame-size=" << network.opus_frame_ms
              << " inband-fec=" << (network.inband_fec ? "true" : "false")
              << " packet-loss-percentage=" << (network.inband_fec ? 3 : 0)
