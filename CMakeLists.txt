@@ -5,7 +5,7 @@ if(POLICY CMP0144)
 endif()
 
 project(OpenAudioMatrixRouter
-    VERSION 0.1.0
+    VERSION 0.2.4
     DESCRIPTION "Open-source cross-platform audio matrix router"
     LANGUAGES CXX)
 

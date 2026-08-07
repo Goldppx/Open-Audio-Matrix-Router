@@ -1,200 +1,99 @@
 # Open Audio Matrix Router (OAMR)
 
-OAMR is an Apache-2.0 open-source, cross-platform audio matrix router. Its first milestone is a command-line RTP/Opus link: microphone on computer A to speaker on computer B. The core is C++20 and platform-neutral; GStreamer supplies the current device and network backend.
+OAMR is an Apache-2.0, C++20 audio-routing prototype for local devices and
+trusted LANs. It combines a local device matrix, RTP/Opus transport, and a
+loopback-only Web UI. The current production target is Windows x64; Linux is
+kept as a build target through the GStreamer backend abstraction.
 
-## MVP scope
+## What works today
 
-- Windows and Linux first; macOS and Android remain backend-extension targets.
-- Manual IPv4/DNS host and UDP port configuration on a trusted LAN.
-- RTP/UDP with Opus, 48 kHz, stereo, 20 ms frames, RTP payload type 96.
-- One-to-one and one-to-many graph representation. Mixing is intentionally deferred.
-- Default audio devices work first. Non-default selection is supported where the installed GStreamer source/sink plugin exposes a string `device` property; unsupported plugins fall back to the default endpoint.
+- Enumerate WASAPI capture and playback devices through GStreamer.
+- Local microphone/render-loopback to one or more playback routes.
+- RTP/UDP + Opus audio send and receive with 48 kHz PCM conversion.
+- Multiple independently startable routes, with pause, resume and deletion.
+- Per-network-route quality, latency target and mode adjustment.
+- LAN pairing using one-time codes, aliases and exposed-device catalogs.
+- Paired-device telemetry: active device, quality, target latency and packet
+  loss field.
+- Local Web UI at `127.0.0.1`; only the pairing control channel binds to the
+  LAN on TCP 8791.
+- Portable Windows ZIP containing the private GStreamer subset and MSVC
+  runtime—no system-wide GStreamer or VC++ redistributable installation.
 
-Not in this milestone: encryption, discovery, NAT traversal, virtual device drivers, WebRTC, GUI, or Android packaging.
+## Important limitations
+
+This is an MVP, not a Dante-compatible production system. Pairing control has
+no encryption or persistent authentication, discovery is manual, Auto mode
+does not yet consume measured feedback, and Windows virtual audio devices are
+not implemented. Use it only on a trusted LAN. Remote matrix routing requires
+both computers to run the same recent OAMR portable release.
+
+## Quick start: Windows portable package
+
+1. Download the latest archive from `dist/`, extract it anywhere, and run:
+
+   ```bat
+   run-oamr.cmd web --port 8790
+   ```
+
+2. Open <http://127.0.0.1:8790>.
+3. On each computer, select the devices to expose and save the pairing profile.
+4. Generate a one-time pairing code on one computer; enter its IP, TCP 8791,
+   alias and code on the other computer.
+5. Use **音频矩阵** to create local or paired RTP routes. Modify quality,
+   target latency and mode afterwards in **路由表**.
+
+Allow inbound TCP 8791 on a Private Windows network. RTP media ports are
+selected dynamically from the 52000 range for paired matrix routes; permit the
+corresponding UDP traffic between the two trusted machines.
+
+## Build from source
+
+Prerequisites:
+
+- CMake 3.24+
+- C++20 compiler
+- GStreamer 1.20+ development/runtime packages with audio, RTP and Opus
+- On Windows, the official x64 MSVC GStreamer SDK
+
+Windows example:
+
+```powershell
+cmake -S . -B build-release -G "NMake Makefiles" `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DGSTREAMER_ROOT="C:/Program Files/GStreamer/1.0/msvc_x86_64"
+cmake --build build-release
+ctest --test-dir build-release --output-on-failure
+```
+
+For the repeatable release workflow:
+
+```powershell
+.\scripts\build-and-package.ps1 -Version 0.2.4-dev
+```
+
+It configures the Release build, executes the tests, and writes a portable ZIP
+to `dist/`.
 
 ## Architecture
 
-`AudioNode` groups one device or virtual endpoint's ports. Every `AudioPort` has exactly one direction:
-
-- **Source** produces audio for the router: microphone, RTP receiver, or an output that has been intentionally republished as a virtual input.
-- **Sink** consumes router audio: speaker, recorder, RTP sender, or a virtual output.
-
-`AudioConnection` is always `Source -> Sink`. A node can contain Source, Sink, or both kinds of ports, so the model can represent the requested `A1 -> B0` path without giving one port contradictory directions. `AudioGraph` is desired state only; future router workers will reconcile it with live GStreamer pipelines.
-
 ```text
-Computer A                                  Computer B
-mic Source -> GStreamer -> Opus/RTP/UDP  -> RTP/Opus -> GStreamer -> speaker Sink
+Loopback-only Web UI ──► route table ──► GStreamer pipelines
+          │                    │
+          └── pairing TCP 8791 ┴── paired catalog / remote route request
+
+WASAPI source ─► convert/resample ─► Opus/RTP/UDP ─► jitter buffer ─► sink
 ```
 
-See [docs/architecture.md](docs/architecture.md) for module responsibilities and extension points.
+- `src/core`: platform-neutral node, port and graph model.
+- `src/gstreamer`: device discovery and local/RTP pipeline implementation.
+- `src/pairing`: one-time-code pairing, catalog synchronization and remote
+  route control.
+- `src/web`: loopback-only HTTP API and embedded Web UI.
+- `scripts`: portable runtime packaging and one-command build workflow.
 
-## Dependencies
+More detail is in [docs/architecture.md](docs/architecture.md).
 
-Install these before configuring the full MVP:
+## License
 
-- CMake 3.24 or newer
-- A C++20 compiler (MSVC 2022, GCC 12+, or Clang 15+ recommended)
-- GStreamer 1.20+ runtime **and development** packages
-- GStreamer base, good, and bad plugin sets, including `opus`, `rtp`, `udp`, and a platform audio source/sink
-- `pkg-config` / `pkgconf` on Linux and other Unix-like development hosts. On Windows, CMake can directly use the official GStreamer MSVC installation; set `-DGSTREAMER_ROOT=C:/path/to/msvc_x86_64` only when it is not installed in the default location.
-
-On Ubuntu 24.04, a suitable starting point is:
-
-```bash
-sudo apt install build-essential cmake pkg-config libgstreamer1.0-dev \
-  libgstreamer-plugins-base1.0-dev gstreamer1.0-tools \
-  gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
-```
-
-On Windows, install the official GStreamer MSVC development and runtime packages matching the compiler architecture. Ensure `pkg-config` can find the package `.pc` files via `PKG_CONFIG_PATH`, and put GStreamer's `bin` directory on `PATH` when running `oamr`.
-
-## Build
-
-```bash
-cmake -S . -B build -DOAMR_ENABLE_GSTREAMER=ON
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
-```
-
-For a Core-only build without GStreamer:
-
-```bash
-cmake -S . -B build-core -DOAMR_ENABLE_GSTREAMER=OFF
-cmake --build build-core --config Debug
-ctest --test-dir build-core -C Debug --output-on-failure
-```
-
-## Run the network demo
-
-## Local Web UI
-
-Run a browser-based local control page with no Qt dependency:
-
-```bat
-build-gstreamer-check\run-oamr.cmd web
-```
-
-Then open [http://127.0.0.1:8787](http://127.0.0.1:8787). The server binds only to loopback, lists GStreamer devices, and can start/stop one local Source-to-Sink route. It is deliberately not exposed to the LAN and does not yet replace the full matrix UI.
-
-On Windows development builds, use the generated `run-oamr.cmd` launcher rather than launching `oamr.exe` directly. It provides the GStreamer DLL and plugin paths without changing the system-wide `PATH`:
-
-```bat
-build-gstreamer-check\run-oamr.cmd devices
-```
-
-The release installer will package a private runtime instead; this launcher is only for in-tree development.
-
-## Windows portable package
-
-Create a Release build first, then create a self-contained ZIP containing
-OAMR, its minimal GStreamer runtime closure, required WASAPI/RTP/Opus plugins,
-and the MSVC x64 app-local redistributable DLLs:
-
-```powershell
-cmake -S . -B build-portable-release -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DGSTREAMER_ROOT="C:/Program Files/GStreamer/1.0/msvc_x86_64"
-cmake --build build-portable-release
-.\scripts\package-portable.ps1 -BuildDirectory build-portable-release -Version 0.1.0-dev
-```
-
-For the normal Windows release workflow, use the single helper instead. It
-configures the Release tree, runs the test suite, then writes the ZIP to
-`dist/`:
-
-```powershell
-.\scripts\build-and-package.ps1 -Version 0.1.6-telemetry
-```
-
-The generated file is placed under `dist/`. On another Windows x64 device,
-extract it anywhere and run `run-oamr.cmd web --port 8792`. The package keeps
-its GStreamer DLL, plugins, and required MSVC runtime DLLs private; it does
-not modify system `PATH` or require a separate VC++ runtime installation. It
-targets supported Windows x64 systems, which provide the Windows Universal CRT.
-
-The minimal runtime intentionally includes only WASAPI device access, audio
-conversion/resampling/mixing, Opus, RTP, RTP jitter buffering, UDP, and their
-dependency DLLs. Adding a codec or platform backend requires updating the
-allowlist in `scripts/package-portable.ps1` and rerunning the extracted-package
-smoke test.
-
-On computer B (the speaker), start the receiver. The network profile is set
-independently on each endpoint; use the same latency choice on both ends for
-predictable results:
-
-```bash
-oamr receive --port 5004 --quality high --max-latency-ms 100 --mode auto
-```
-
-On computer A (the microphone), send to B's LAN address:
-
-```bash
-oamr send --host 192.168.1.20 --port 5004 --quality high --max-latency-ms 100 --mode auto
-```
-
-### Network profile
-
-`--quality` accepts `low`, `medium`, or `high`; it selects a 48, 96, or
-160 kbps stereo Opus starting point. `--max-latency-ms` accepts `40`, `60`,
-`100`, or `150`. `--mode` accepts:
-
-- `stable`: 10/20 ms frames, FEC enabled, and the receiver preserves audio
-  continuity even when this can briefly exceed the target.
-- `auto`: 5/10 ms frames and a bounded jitter buffer. The profile includes a
-  deterministic quality adaptation policy ready to consume remote feedback.
-- `low-latency`: 5 ms frames and a small jitter buffer; late packets are
-  discarded rather than increasing playout delay. This costs more CPU and is
-  less tolerant of loss.
-
-The current transport applies the selected initial profile to GStreamer. The
-next transport increment adds the receiver-to-sender LAN feedback channel that
-supplies measured loss, jitter, and playout delay to Auto mode.
-
-### LAN pairing and exposed-device catalog
-
-`run-oamr.cmd web --port 8790` keeps the Web UI bound to
-`127.0.0.1:8790`. Pairing uses a separate, narrowly scoped TCP listener on
-port `8791`; it accepts only a one-time, six-character code generated on the
-receiving computer's local Web UI. Allow TCP 8791 on a Private network if
-Windows Firewall asks; no inbound rule is needed for the Web UI itself.
-
-In **设备配对**, select the local capture, render-loopback, and/or sink devices
-that may be shown to paired computers, save the profile, and generate a code.
-On the other machine, enter this computer's IP, `8791`, an alias, and the
-code. The peer's allowed device catalog is then shown in **已配对设备** and is
-stored next to the executable in `oamr-pairing-state.txt` (excluded from Git).
-The Web UI itself never listens on a LAN interface.
-
-Pairing exchanges device metadata only. RTP/Opus audio still uses the explicit
-send/receive cards and UDP port selected by the user; remote graph control is
-intentionally not inferred from pairing because it needs a persistent,
-authenticated control protocol.
-
-For same-computer microphone-to-speaker testing:
-
-```bash
-oamr loopback
-```
-
-For a single local source copied to multiple local sinks, repeat `--sink-device`:
-
-```bat
-build-gstreamer-check\run-oamr.cmd fanout --source-device "wasapi2src|<capture-device-id>" ^
-  --sink-device "wasapi2sink|<speaker-a-id>" --sink-device "wasapi2sink|<speaker-b-id>"
-```
-
-Use IDs printed by `devices`. Avoid selecting a render-loopback source and the same physical speaker as its sink, because that can create audible feedback.
-
-Use `oamr devices` to inspect GStreamer-discovered devices. Copy a selectable device ID (quote it in PowerShell because it contains `|`) into `--device`, `--source-device`, or `--sink-device`. Press Ctrl+C to stop. The default receiver jitter buffer is 60 ms, targeting LAN end-to-end latency under 100 ms under normal conditions.
-
-`oamr` currently monitors the GStreamer bus after startup and reports negotiation, permission, device, and end-of-stream failures instead of continuing to claim it is running. The live pipeline is stopped and recreated when a caller changes device settings; an interactive device-switch command will arrive with the RouterEngine.
-
-## Repository layout
-
-```text
-apps/oamr/       Command-line MVP entry point
-include/oamr/    Public Core and GStreamer backend interfaces
-src/core/        Platform-neutral graph model
-src/gstreamer/   Current device discovery and RTP/Opus backend
-tests/           Dependency-free Core tests
-docs/            Architecture and development decisions
-cmake/           CMake dependency discovery
-```
+Apache-2.0. See [LICENSE](LICENSE).

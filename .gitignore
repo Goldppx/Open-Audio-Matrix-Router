@@ -5,6 +5,7 @@
 /dist/
 /.portable-stage-*/
 /.portable-verify-*/
+/portable-verify-*/
 /CMakeCache.txt
 /CMakeFiles/
 /Testing/
