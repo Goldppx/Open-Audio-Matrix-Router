@@ -1,0 +1,67 @@
+:root {
+  color-scheme: dark;
+  font-family: Roboto, "Microsoft YaHei UI", system-ui, sans-serif;
+  --md-sys-color-primary: #d0bcff;
+  --md-sys-color-on-primary: #381e72;
+  --md-sys-color-primary-container: #4f378b;
+  --md-sys-color-on-primary-container: #e9ddff;
+  --md-sys-color-secondary-container: #4a4458;
+  --md-sys-color-on-secondary-container: #e8def8;
+  --md-sys-color-surface: #141218;
+  --md-sys-color-surface-container: #211f26;
+  --md-sys-color-surface-container-high: #2b2930;
+  --md-sys-color-on-surface: #e6e0e9;
+  --md-sys-color-on-surface-variant: #cac4d0;
+  --md-sys-color-outline: #938f99;
+  --md-sys-color-error: #ffb4ab;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
+button, input, select { font: inherit; }
+
+.app-shell { max-width: 1440px; margin: 0 auto; padding: 24px; }
+.app-header { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; padding: 10px 4px 28px; }
+.app-header h1 { margin: 0; font-size: clamp(1.7rem, 3vw, 2.35rem); letter-spacing: -.03em; }
+.app-header p { margin: 8px 0 0; color: var(--md-sys-color-on-surface-variant); }
+.status-chip { white-space: nowrap; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.wide { grid-column: 1 / -1; }
+.card { display: block; padding: 22px; background: var(--md-sys-color-surface-container); border-radius: 24px; }
+.card h2 { margin: 0 0 7px; font-size: 1.25rem; }
+.muted { color: var(--md-sys-color-on-surface-variant); line-height: 1.55; margin: 0 0 16px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: center; }
+.stack { display: grid; gap: 12px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+md-outlined-text-field, md-filled-select { width: 100%; }
+md-outlined-select { width: 100%; }
+md-divider { margin: 18px 0; }
+
+.data-table-wrap { overflow-x: auto; border: 1px solid var(--md-sys-color-outline); border-radius: 14px; }
+.data-table { border-collapse: collapse; width: 100%; min-width: 740px; }
+.data-table th, .data-table td { padding: 12px; border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline) 45%, transparent); text-align: left; vertical-align: middle; }
+.data-table th { color: var(--md-sys-color-on-surface-variant); font-weight: 600; background: var(--md-sys-color-surface-container-high); }
+.data-table tr:last-child td { border-bottom: none; }
+.matrix-table { min-width: 850px; }
+.matrix-table td, .matrix-table th { text-align: center; }
+.matrix-table th:first-child { text-align: left; min-width: 260px; }
+.disabled { color: var(--md-sys-color-outline); }
+.route-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.route-property { min-width: 102px; }
+.peer-card { padding: 13px 0; border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline) 45%, transparent); }
+.peer-card:last-child { border-bottom: 0; }
+.peer-title { display: flex; align-items: center; gap: 8px; }
+.endpoint-chip { margin: 6px 4px 0 0; }
+.exposure-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 240px; overflow: auto; padding: 5px; }
+.exposure-row { display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 10px; background: var(--md-sys-color-surface-container-high); }
+.log { margin: 0; min-height: 28px; padding: 12px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; background: #0e0d11; border-radius: 12px; color: var(--md-sys-color-on-surface-variant); }
+.empty { color: var(--md-sys-color-on-surface-variant); padding: 16px 0; }
+.dialog-form { display: grid; gap: 13px; padding: 4px; min-width: min(400px, 80vw); }
+
+@media (max-width: 760px) {
+  .app-shell { padding: 15px; }
+  .app-header, .grid, .form-grid, .exposure-list { grid-template-columns: 1fr; display: grid; }
+  .app-header { gap: 10px; }
+  .wide { grid-column: auto; }
+  .card { padding: 17px; border-radius: 18px; }
+}
