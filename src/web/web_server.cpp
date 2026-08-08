@@ -8,6 +8,8 @@
 #include <charconv>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -79,6 +81,35 @@ std::unordered_map<std::string, std::string> query_params(const std::string& tar
         result[url_decode(item.substr(0, delimiter))] = url_decode(delimiter == std::string::npos ? "" : item.substr(delimiter + 1));
     }
     return result;
+}
+
+std::string content_type_for(const std::filesystem::path& path) {
+    const auto extension = path.extension().string();
+    if (extension == ".html") return "text/html; charset=utf-8";
+    if (extension == ".js") return "text/javascript; charset=utf-8";
+    if (extension == ".css") return "text/css; charset=utf-8";
+    if (extension == ".svg") return "image/svg+xml";
+    if (extension == ".png") return "image/png";
+    if (extension == ".ico") return "image/x-icon";
+    return "application/octet-stream";
+}
+
+std::optional<std::string> static_asset(const std::string& target, std::string& type) {
+    const auto query = target.find('?');
+    const std::string request_path = target.substr(0, query);
+    if (request_path != "/" && request_path.rfind("/assets/", 0) != 0) return std::nullopt;
+
+    const std::filesystem::path relative = request_path == "/" ? "index.html" : request_path.substr(1);
+    const auto normalized = relative.lexically_normal();
+    if (normalized.empty() || normalized.is_absolute() || normalized.string().starts_with("..")) return std::nullopt;
+
+    const auto file = std::filesystem::current_path() / "web" / normalized;
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(file, error)) return std::nullopt;
+    std::ifstream input(file, std::ios::binary);
+    if (!input) return std::nullopt;
+    type = content_type_for(file);
+    return std::string{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
 const char* kPairControlPage = R"HTML(
@@ -313,6 +344,9 @@ public:
 
     std::string handle(const std::string& method, const std::string& target, std::string& type) {
         type = "text/plain; charset=utf-8";
+        if (method == "GET") {
+            if (const auto asset = static_asset(target, type)) return *asset;
+        }
         if (method == "GET" && target.rfind("/api/devices", 0) == 0) { type = "application/json; charset=utf-8"; return devices_json(); }
         if (method == "GET" && target.rfind("/api/routes", 0) == 0) {
             type = "application/json; charset=utf-8"; std::ostringstream out; out << '['; bool first = true;
@@ -471,7 +505,6 @@ public:
             if (target.find("/delete", slash) != std::string::npos) return erase_route(id) ? "Route deleted." : "Route not found.";
         }
         if (method == "POST" && target.rfind("/api/stop", 0) == 0) { stop_all_routes(); pairing.set_telemetry({}); pairing.announce(); return "All routes stopped and telemetry synchronized."; }
-        if (method == "GET" && (target == "/" || target.rfind("/?", 0) == 0)) { type = "text/html; charset=utf-8"; return kPairControlPage; }
         return "Not found";
     }
 };

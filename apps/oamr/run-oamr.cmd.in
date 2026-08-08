@@ -12,5 +12,7 @@ set "OAMR_GSTREAMER_ROOT=@GSTREAMER_RUNTIME_ROOT@"
 set "PATH=%OAMR_GSTREAMER_ROOT%\bin;%PATH%"
 set "GST_PLUGIN_PATH_1_0=%OAMR_GSTREAMER_ROOT%\lib\gstreamer-1.0"
 
+pushd "%~dp0"
 "%~dp0oamr.exe" %*
+popd
 exit /b %ERRORLEVEL%

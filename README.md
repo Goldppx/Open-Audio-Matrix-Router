@@ -15,8 +15,8 @@ kept as a build target through the GStreamer backend abstraction.
 - LAN pairing using one-time codes, aliases and exposed-device catalogs.
 - Paired-device telemetry: active device, quality, target latency and packet
   loss field.
-- Local Web UI at `127.0.0.1`; only the pairing control channel binds to the
-  LAN on TCP 8791.
+- Local Material Design 3 Web UI at `127.0.0.1`; only the pairing control
+  channel binds to the LAN on TCP 8791.
 - Portable Windows ZIP containing the private GStreamer subset and MSVC
   runtime—no system-wide GStreamer or VC++ redistributable installation.
 
@@ -55,6 +55,20 @@ Prerequisites:
 - C++20 compiler
 - GStreamer 1.20+ development/runtime packages with audio, RTP and Opus
 - On Windows, the official x64 MSVC GStreamer SDK
+- Node.js 22+ and npm (development/build only; never required by end users)
+
+Build the offline Web UI once before configuring CMake:
+
+```powershell
+cd web
+npm ci
+npm run build
+cd ..
+```
+
+The TypeScript/Vite build is written to `web/dist`. CMake copies it beside
+`oamr.exe`; the executable serves it locally. Node.js, Vite, a CDN, and a
+separate Node HTTP server are not part of the portable runtime.
 
 Windows example:
 
@@ -89,7 +103,8 @@ WASAPI source ─► convert/resample ─► Opus/RTP/UDP ─► jitter buffer �
 - `src/gstreamer`: device discovery and local/RTP pipeline implementation.
 - `src/pairing`: one-time-code pairing, catalog synchronization and remote
   route control.
-- `src/web`: loopback-only HTTP API and embedded Web UI.
+- `src/web`: loopback-only HTTP API and static Vite asset server.
+- `web`: TypeScript + Vite + Material Web (Material Design 3) frontend.
 - `scripts`: portable runtime packaging and one-command build workflow.
 
 More detail is in [docs/architecture.md](docs/architecture.md).
@@ -99,3 +114,6 @@ For a handoff-ready Linux implementation plan, see
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+The desktop UI uses Material Web 2.5.0 under Apache-2.0; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

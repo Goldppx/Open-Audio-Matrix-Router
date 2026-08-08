@@ -5,7 +5,7 @@ if(POLICY CMP0144)
 endif()
 
 project(OpenAudioMatrixRouter
-    VERSION 0.2.4
+    VERSION 0.3.0
     DESCRIPTION "Open-source cross-platform audio matrix router"
     LANGUAGES CXX)
 
@@ -126,6 +126,20 @@ if(OAMR_ENABLE_GSTREAMER)
     # -----------------------------------------------------------------------
     add_executable(oamr apps/oamr/main.cpp)
     target_link_libraries(oamr PRIVATE oamr::web oamr::pairing oamr::gstreamer)
+
+    # The browser UI is compiled by Vite to web/dist.  Keep the runtime
+    # dependency-free: oamr.exe serves these files itself, and Node.js is only
+    # required when a developer builds the frontend.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/web/dist/index.html")
+        add_custom_target(oamr_web_assets ALL
+            COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:oamr>/web"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/web/dist" "$<TARGET_FILE_DIR:oamr>/web"
+            DEPENDS oamr
+            COMMENT "Copying Vite Web UI next to oamr.exe")
+    else()
+        message(WARNING "Vite UI has not been built. Run: cd web && npm ci && npm run build")
+    endif()
 
     if(MSVC)
         target_compile_options(oamr PRIVATE /W4 /permissive- /utf-8)

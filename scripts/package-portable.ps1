@@ -35,6 +35,12 @@ try {
     New-Item -ItemType Directory -Path $stage | Out-Null
     Copy-Item -LiteralPath $exe -Destination (Join-Path $stage "oamr.exe")
     Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $stage "README.md")
+    Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $stage "THIRD_PARTY_NOTICES.md")
+    $webAssets = Join-Path $projectRoot "web\dist"
+    if (-not (Test-Path -LiteralPath (Join-Path $webAssets "index.html"))) {
+        throw "Vite Web UI assets are missing. Run: cd web; npm ci; npm run build"
+    }
+    Copy-Item -LiteralPath $webAssets -Destination (Join-Path $stage "web") -Recurse
     # App-local deployment: Windows resolves these official MSVC Redist DLLs
     # next to oamr.exe, so users do not need to install VC++ separately.
     Get-ChildItem -LiteralPath $VCRuntimeDirectory -Filter "*.dll" | Copy-Item -Destination $stage
@@ -79,7 +85,9 @@ set "GST_PLUGIN_PATH_1_0=%OAMR_ROOT%runtime\lib\gstreamer-1.0"
 set "GST_PLUGIN_SYSTEM_PATH_1_0=%OAMR_ROOT%runtime\lib\gstreamer-1.0"
 set "GST_PLUGIN_SCANNER=%OAMR_ROOT%runtime\libexec\gstreamer-1.0\gst-plugin-scanner.exe"
 chcp 65001 >nul
+pushd "%OAMR_ROOT%"
 "%OAMR_ROOT%oamr.exe" %*
+popd
 endlocal
 '@ | Set-Content -LiteralPath (Join-Path $stage "run-oamr.cmd") -Encoding ascii
 
