@@ -264,6 +264,8 @@ wpctl status
 - 不要为了 Linux 支持删除 WASAPI 后端。
 - 不要改变 RTP payload type 96 或现有配对 HTTP 参数，除非同时做显式
   协议版本升级。
-- 不要把 Web UI 暴露到 `0.0.0.0`；它必须继续只绑定 `127.0.0.1`。
+- Web UI 默认必须只绑定 `127.0.0.1`。当用户明确传入
+  `web --hostname <LAN IPv4>` 时，才允许绑定该指定地址；拒绝
+  `0.0.0.0`，并在文档中提醒该模式目前没有 HTTP 鉴权。
 - 不要把 PipeWire node ID 当作跨机器 ID；它只对该 Linux 主机有意义。
 - 不要假设所有 PipeWire source 都是硬件麦克风；monitor source 是合法路由源。

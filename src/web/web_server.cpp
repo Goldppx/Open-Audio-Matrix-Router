@@ -660,7 +660,7 @@ WebServer::WebServer() : impl_(std::make_unique<Impl>()) {
 }
 WebServer::~WebServer() { stop(); }
 
-bool WebServer::serve(std::uint16_t port) {
+bool WebServer::serve(std::uint16_t port, const std::string& bind_address) {
     if (!impl_->backend) { impl_->error = "No audio backend is available."; diagnostics::write(diagnostics::Level::Error, impl_->error); return false; }
 #ifdef _WIN32
     WSADATA data{};
@@ -669,12 +669,24 @@ bool WebServer::serve(std::uint16_t port) {
     if (!impl_->pairing.start(8791)) { impl_->error = "Could not start pairing service: " + impl_->pairing.last_error(); diagnostics::write(diagnostics::Level::Error, impl_->error); return false; }
     Socket listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listener == kInvalidSocket) { impl_->error = "Could not create HTTP socket."; diagnostics::write(diagnostics::Level::Error, impl_->error); return false; }
-    sockaddr_in address{}; address.sin_family = AF_INET; address.sin_port = htons(port); address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || listen(listener, 8) != 0) {
-        impl_->error = "Could not bind 127.0.0.1:" + std::to_string(port) + "."; diagnostics::write(diagnostics::Level::Error, impl_->error); close_socket(listener); impl_->pairing.stop(); return false;
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    if (inet_pton(AF_INET, bind_address.c_str(), &address.sin_addr) != 1) {
+        impl_->error = "Invalid Web UI IPv4 bind address: " + bind_address + ".";
+        diagnostics::write(diagnostics::Level::Error, impl_->error);
+        close_socket(listener);
+        impl_->pairing.stop();
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return false;
     }
-    diagnostics::write(diagnostics::Level::Info, "OAMR Web UI listening on 127.0.0.1:" + std::to_string(port) + ".");
-    std::cout << "OAMR Web UI: http://127.0.0.1:" << port << "\nPress Ctrl+C to stop.\n";
+    if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || listen(listener, 8) != 0) {
+        impl_->error = "Could not bind " + bind_address + ":" + std::to_string(port) + "."; diagnostics::write(diagnostics::Level::Error, impl_->error); close_socket(listener); impl_->pairing.stop(); return false;
+    }
+    diagnostics::write(diagnostics::Level::Info, "OAMR Web UI listening on " + bind_address + ":" + std::to_string(port) + ".");
+    std::cout << "OAMR Web UI: http://" << bind_address << ':' << port << "\nPress Ctrl+C to stop.\n";
     while (!impl_->stopping) {
         fd_set set; FD_ZERO(&set); FD_SET(listener, &set); timeval timeout{0, 200000};
         if (select(static_cast<int>(listener + 1), &set, nullptr, nullptr, &timeout) > 0) {

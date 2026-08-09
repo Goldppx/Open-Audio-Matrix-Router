@@ -2,7 +2,7 @@
 
 OAMR is an Apache-2.0, C++20 audio-routing prototype for local devices and
 trusted LANs. It combines a local device matrix, RTP/Opus transport, and a
-loopback-only Web UI. The current production target is Windows x64; Linux is
+local-first Web UI. The current production target is Windows x64; Linux is
 kept as a build target through the GStreamer backend abstraction.
 
 ## What works today
@@ -19,8 +19,8 @@ kept as a build target through the GStreamer backend abstraction.
 - LAN pairing using one-time codes, aliases and exposed-device catalogs.
 - Paired-device telemetry: active device, quality, target latency and packet
   loss field.
-- Local Material Design 3 Web UI at `127.0.0.1`; only the pairing control
-  channel binds to the LAN on TCP 8791.
+- Material Design 3 Web UI binds to `127.0.0.1` by default. It can be
+  explicitly bound to one trusted-LAN IPv4 address when needed.
 - Incremental, level-filtered diagnostics for routes, GStreamer failures,
   pairing, device enumeration and multi-adapter LAN discovery.
 - Portable Windows ZIP containing the private GStreamer subset and MSVC
@@ -53,6 +53,21 @@ computers to run the same recent OAMR portable release.
 Allow inbound TCP 8791 and discovery UDP 8792 on a Private Windows network. RTP media ports are
 selected dynamically from the 52000 range for paired matrix routes; permit the
 corresponding UDP traffic between the two trusted machines.
+
+### Optional LAN Web UI access
+
+The Web UI stays private to the local machine by default. To make it reachable
+from another device on a trusted LAN, explicitly bind it to the computer's LAN
+IPv4 address (do not use `0.0.0.0`):
+
+```bat
+run-oamr.cmd web --hostname 192.168.31.99 --port 8790
+```
+
+Then open `http://192.168.31.99:8790` from that LAN device. This mode has **no
+HTTP authentication yet**: anyone who can reach the address can control audio
+routes and pairing settings. Keep it disabled unless you need it, and use only
+on a trusted private network.
 
 ## Build from source
 
@@ -110,7 +125,8 @@ WASAPI source ─► convert/resample ─► Opus/RTP/UDP ─► jitter buffer �
 - `src/gstreamer`: device discovery and local/RTP pipeline implementation.
 - `src/pairing`: one-time-code pairing, catalog synchronization and remote
   route control.
-- `src/web`: loopback-only HTTP API and static Vite asset server.
+- `src/web`: local-first HTTP API and static Vite asset server, with explicit
+  single-interface LAN binding support.
 - `web`: TypeScript + Vite + Material Web (Material Design 3) frontend.
 - `scripts`: portable runtime packaging and one-command build workflow.
 

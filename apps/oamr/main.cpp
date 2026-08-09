@@ -22,7 +22,7 @@ void stop_handler(int) { keep_running = 0; }
 void usage() {
     std::cout << "OAMR command-line MVP\n\n"
               << "  oamr devices\n"
-              << "  oamr web [--port <1-65535>]\n"
+              << "  oamr web [--port <1-65535>] [--hostname <IPv4-address>]\n"
               << "  oamr loopback [--source-device <backend-device>] [--sink-device <backend-device>] [--render-loopback]\n"
               << "  oamr fanout --sink-device <backend-device> [--sink-device <backend-device> ...] [--source-device <backend-device>]\n"
               << "  oamr send --host <IPv4-or-DNS> --port <1-65535> [--device <backend-device>] [network options]\n"
@@ -126,8 +126,13 @@ int main(int argc, char** argv) {
             std::cerr << "Invalid HTTP port.\n";
             return 1;
         }
+        std::string hostname = "127.0.0.1";
+        if (option_value(argc, argv, "--hostname", hostname) && hostname == "0.0.0.0") {
+            std::cerr << "Web UI must bind to a specific IPv4 address, not 0.0.0.0.\n";
+            return 1;
+        }
         oamr::web::WebServer server;
-        if (!server.serve(port)) {
+        if (!server.serve(port, hostname)) {
             std::cerr << "Could not start web UI: " << server.last_error() << "\n";
             return 2;
         }

@@ -49,7 +49,7 @@ struct RemoteRouteRequest {
 };
 
 /**
- * LAN-only control plane. Web UI stays loopback-only; this service binds to
+ * LAN-only control plane. The Web UI is loopback-only by default; this service binds to
  * the configured pairing port and accepts only code-authorized peers.
  */
 class PairingService {
