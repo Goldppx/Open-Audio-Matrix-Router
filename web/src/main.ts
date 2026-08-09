@@ -140,7 +140,7 @@ function renderShell(): void {
         <h1>Open Audio Matrix Router</h1>
       </header>
       <div class="grid">
-        <section class="card wide"><h2>路由表</h2><div id="routeTable" class="empty">正在加载路线…</div><div class="actions"><md-outlined-button id="stopAll">停止并清空所有路由</md-outlined-button></div></section>
+        <section class="card wide"><h2>路由表</h2><div id="routeTable" class="route-table-host"><div class="route-table-placeholder empty">正在加载路线…</div></div><div class="actions"><md-outlined-button id="stopAll">停止并清空所有路由</md-outlined-button></div></section>
 
         <section class="card"><h2>发送到局域网</h2><div class="stack"><md-outlined-select id="networkSource" label="音频来源"></md-outlined-select><div class="form-grid"><md-outlined-text-field id="sendHost" label="IP / 主机名" value="127.0.0.1"></md-outlined-text-field><md-outlined-text-field id="sendPort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field></div></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="createSender"', uiLabel('创建发送路线', 'Create sender route'), icons.send)}</div></div></section>
         <section class="card"><h2>从局域网接收</h2><div class="stack"><md-outlined-select id="receiveSink" label="播放到"></md-outlined-select><md-outlined-text-field id="receivePort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="createReceiver"', uiLabel('创建接收路线', 'Create receiver route'), icons.receive)}</div></div></section>
@@ -357,7 +357,7 @@ function renderRoutes(routes: Route[]): void {
     const deletion = iconButton(`data-delete="${route.id}"`, deleteConfirmation === route.id ? uiLabel('确认删除路线', 'Confirm route deletion') : uiLabel('删除路线', 'Delete route'), icons.delete, deleteClass);
     return `<tr><td>${escapeHtml(route.label)}</td><td>${route.enabled ? '运行中' : '已暂停'}</td><td>${route.network ? `${route.quality} · ${route.latency} ms · ${route.mode}` : '本地路线'}</td><td><div class="route-actions">${toggle}${configuration}${deletion}</div></td></tr>`;
   }).join('');
-  byId<HTMLElement>('routeTable').innerHTML = routes.length ? `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>路线</th><th>状态</th><th>传输属性</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">暂无路线。</div>';
+  byId<HTMLElement>('routeTable').innerHTML = routes.length ? `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>路线</th><th>状态</th><th>传输属性</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="route-table-placeholder empty">暂无路线。</div>';
   document.querySelectorAll<HTMLElement>('[data-toggle]').forEach(button => button.addEventListener('click', () => void post(`/api/routes/${button.dataset.toggle}/toggle?enabled=${button.dataset.enabled}`)));
   document.querySelectorAll<HTMLElement>('[data-config]').forEach(button => button.addEventListener('click', () => openRouteDialog(routes.find(route => route.id === Number(button.dataset.config))!)));
   document.querySelectorAll<HTMLElement>('[data-delete]').forEach(button => button.addEventListener('click', () => {

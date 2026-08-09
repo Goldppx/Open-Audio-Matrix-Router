@@ -67,6 +67,8 @@ md-divider { margin: 18px 0; }
 .disabled { color: var(--md-sys-color-outline); }
 .route-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .route-property { min-width: 102px; }
+.route-table-host { min-block-size: 64px; }
+.route-table-placeholder { display: flex; align-items: center; min-block-size: 64px; }
 .peer-card { padding: 13px 0; border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline) 45%, transparent); }
 .peer-card:last-child { border-bottom: 0; }
 .peer-title { display: flex; align-items: center; gap: 8px; }
