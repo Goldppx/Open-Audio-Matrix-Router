@@ -14,6 +14,12 @@
 #include <sstream>
 #include <thread>
 
+#include <boost/asio/connect.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
+
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -26,6 +32,10 @@
 
 namespace oamr::pairing {
 namespace {
+namespace asio = boost::asio;
+namespace beast = boost::beast;
+namespace http = beast::http;
+using tcp = asio::ip::tcp;
 #ifdef _WIN32
 using Socket = SOCKET; constexpr Socket kInvalidSocket = INVALID_SOCKET;
 void close_socket(Socket socket) { closesocket(socket); }
@@ -93,6 +103,42 @@ AudioTelemetry deserialize_telemetry(const std::string& text) {
     telemetry.quality = unescape(quality); telemetry.device_name = unescape(name);
     try { telemetry.target_latency_ms = static_cast<std::uint16_t>(std::stoul(latency)); telemetry.packet_loss_percent = std::stod(loss); } catch (...) {}
     return telemetry;
+}
+
+struct HttpReply {
+    bool ok{};
+    std::string body;
+    std::string error;
+};
+
+HttpReply post_control(const std::string& host, std::uint16_t port, const std::string& target) {
+    try {
+        asio::io_context context;
+        tcp::resolver resolver(context);
+        beast::tcp_stream stream(context);
+        stream.expires_after(std::chrono::seconds(3));
+        const auto endpoints = resolver.resolve(host, std::to_string(port));
+        stream.connect(endpoints);
+
+        http::request<http::empty_body> request{http::verb::post, target, 11};
+        request.set(http::field::host, host);
+        request.set(http::field::user_agent, "OAMR-Control/1");
+        request.set(http::field::connection, "close");
+        stream.expires_after(std::chrono::seconds(3));
+        http::write(stream, request);
+
+        beast::flat_buffer buffer;
+        http::response<http::string_body> response;
+        stream.expires_after(std::chrono::seconds(8));
+        http::read(stream, buffer, response);
+        beast::error_code ignored;
+        stream.socket().shutdown(tcp::socket::shutdown_both, ignored);
+        if (response.result_int() < 200 || response.result_int() >= 300)
+            return {false, response.body(), "Remote control returned HTTP " + std::to_string(response.result_int()) + "."};
+        return {true, response.body(), {}};
+    } catch (const std::exception& error) {
+        return {false, {}, error.what()};
+    }
 }
 }
 
@@ -200,26 +246,19 @@ void PairingService::announce() {
     std::string node, alias, catalog, telemetry; std::uint16_t listen_port{}; std::vector<RemotePeer> peers;
     { std::lock_guard lock(impl_->mutex); node = impl_->node_id; alias = impl_->alias; catalog = serialize(impl_->exposed); telemetry = serialize_telemetry(impl_->local_telemetry); listen_port = impl_->listen_port; for (const auto& [_, peer] : impl_->known_peers) peers.push_back(peer); }
     for (const auto& peer : peers) {
-        addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM; addrinfo* addresses{};
-        if (getaddrinfo(peer.host.c_str(), std::to_string(peer.port).c_str(), &hints, &addresses) != 0) continue;
-        Socket socket_fd = socket(addresses->ai_family, addresses->ai_socktype, addresses->ai_protocol);
-        if (socket_fd == kInvalidSocket || connect(socket_fd, addresses->ai_addr, static_cast<int>(addresses->ai_addrlen)) != 0) { if (socket_fd != kInvalidSocket) close_socket(socket_fd); freeaddrinfo(addresses); continue; }
-        freeaddrinfo(addresses);
         const std::string target = "/update?node=" + escape(node) + "&alias=" + escape(alias) + "&port=" + std::to_string(listen_port) + "&catalog=" + escape(catalog) + "&telemetry=" + escape(telemetry);
-        const std::string request = "POST " + target + " HTTP/1.1\r\nHost: " + peer.host + "\r\nConnection: close\r\n\r\n";
-        send(socket_fd, request.data(), static_cast<int>(request.size()), 0); close_socket(socket_fd);
+        // Catalog/telemetry synchronization must never make a local UI action
+        // wait for an offline peer. Beast also gives every operation a timeout.
+        std::thread([host = peer.host, port = peer.port, target] { (void)post_control(host, port, target); }).detach();
     }
 }
 
 bool PairingService::pair_remote(const std::string& host, std::uint16_t port, const std::string& alias, const std::string& code) {
-    addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM; addrinfo* addresses{};
-    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &addresses) != 0) { impl_->error = "Could not resolve pairing host."; return false; }
-    Socket socket_fd = socket(addresses->ai_family, addresses->ai_socktype, addresses->ai_protocol); if (socket_fd == kInvalidSocket || connect(socket_fd, addresses->ai_addr, static_cast<int>(addresses->ai_addrlen)) != 0) { if (socket_fd != kInvalidSocket) close_socket(socket_fd); freeaddrinfo(addresses); impl_->error = "Could not connect to pairing host."; return false; }
-    freeaddrinfo(addresses); std::string node; { std::lock_guard lock(impl_->mutex); node = impl_->node_id; }
+    std::string node; { std::lock_guard lock(impl_->mutex); node = impl_->node_id; }
     const std::string target = "/pair?code=" + escape(code) + "&node=" + escape(node) + "&alias=" + escape(alias) + "&port=" + std::to_string(impl_->listen_port);
-    const std::string request = "POST " + target + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n"; send(socket_fd, request.data(), static_cast<int>(request.size()), 0);
-    char buffer[8192]{}; const int received = recv(socket_fd, buffer, sizeof(buffer) - 1, 0); close_socket(socket_fd); if (received <= 0) { impl_->error = "Pairing host sent no response."; return false; }
-    std::string response(buffer, received); const auto body_at = response.find("\r\n\r\n"); const auto reply = params("?" + response.substr(body_at == std::string::npos ? 0 : body_at + 4));
+    const auto response = post_control(host, port, target);
+    if (!response.ok) { impl_->error = "Could not pair with host: " + response.error; return false; }
+    const auto reply = params("?" + response.body);
     if (reply.contains("error") || !reply.contains("node")) { impl_->error = reply.contains("error") ? reply.at("error") : "Invalid pairing response."; return false; }
     { std::lock_guard lock(impl_->mutex); impl_->known_peers[reply.at("node")] = {reply.at("node"), alias, host, port, deserialize(reply.contains("catalog") ? reply.at("catalog") : "")}; impl_->save_unlocked(); }
     announce();
@@ -239,11 +278,11 @@ void PairingService::set_remote_route_handler(std::function<bool(const RemoteRou
 bool PairingService::request_remote_route(const std::string& node_id, const RemoteRouteRequest& request) {
     RemotePeer peer; std::string local_node;
     { std::lock_guard lock(impl_->mutex); const auto it = impl_->known_peers.find(node_id); if (it == impl_->known_peers.end()) { impl_->error = "Paired device not found."; return false; } peer = it->second; local_node = impl_->node_id; }
-    addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM; addrinfo* addresses{};
-    if (getaddrinfo(peer.host.c_str(), std::to_string(peer.port).c_str(), &hints, &addresses) != 0) { impl_->error = "Could not resolve paired device."; return false; }
-    Socket socket_fd = socket(addresses->ai_family, addresses->ai_socktype, addresses->ai_protocol); if (socket_fd == kInvalidSocket || connect(socket_fd, addresses->ai_addr, static_cast<int>(addresses->ai_addrlen)) != 0) { if (socket_fd != kInvalidSocket) close_socket(socket_fd); freeaddrinfo(addresses); impl_->error = "Could not connect to paired device."; return false; }
-    freeaddrinfo(addresses); const std::string target = "/route?node=" + escape(local_node) + "&kind=" + (request.kind == RemoteRouteKind::Send ? "send" : "receive") + "&device=" + escape(request.device_id) + "&port=" + std::to_string(request.port) + "&quality=" + escape(request.quality) + "&latency=" + std::to_string(request.max_latency_ms) + "&mode=" + escape(request.mode) + "&loopback=" + (request.render_loopback ? "true" : "false");
-    const std::string message = "POST " + target + " HTTP/1.1\r\nHost: " + peer.host + "\r\nConnection: close\r\n\r\n"; send(socket_fd, message.data(), static_cast<int>(message.size()), 0); char buffer[4096]{}; const int received = recv(socket_fd, buffer, sizeof(buffer)-1, 0); close_socket(socket_fd); std::string response(buffer, received > 0 ? static_cast<std::size_t>(received) : 0); const auto body = response.find("\r\n\r\n"); const std::string reply = response.substr(body == std::string::npos ? 0 : body + 4); if (reply != "ok") { impl_->error = reply.empty() ? "Paired device rejected route." : unescape(reply.substr(reply.rfind('=') + 1)); return false; } return true;
+    const std::string target = "/route?node=" + escape(local_node) + "&kind=" + (request.kind == RemoteRouteKind::Send ? "send" : "receive") + "&device=" + escape(request.device_id) + "&port=" + std::to_string(request.port) + "&quality=" + escape(request.quality) + "&latency=" + std::to_string(request.max_latency_ms) + "&mode=" + escape(request.mode) + "&loopback=" + (request.render_loopback ? "true" : "false");
+    const auto response = post_control(peer.host, peer.port, target);
+    if (!response.ok) { impl_->error = "Remote control failed: " + response.error; return false; }
+    if (response.body != "ok") { impl_->error = response.body.empty() ? "Paired device rejected route." : unescape(response.body.substr(response.body.rfind('=') + 1)); return false; }
+    return true;
 }
 
 } // namespace oamr::pairing

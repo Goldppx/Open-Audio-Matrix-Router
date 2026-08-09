@@ -17,7 +17,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(GNUInstallDirs)
+include(FetchContent)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Boost.Beast/Asio is used only by OAMR's LAN control plane.  Fetch the
+# official, fixed source release at configure time so the portable runtime has
+# no Boost DLL dependency.
+set(BOOST_INCLUDE_LIBRARIES beast asio system)
+FetchContent_Declare(oamr_boost
+    URL https://github.com/boostorg/boost/releases/download/boost-1.89.0/boost-1.89.0-cmake.tar.xz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(oamr_boost)
 
 # ---------------------------------------------------------------------------
 # oamr_core: platform-neutral graph model. No audio, socket, or UI dependency.
@@ -61,6 +71,7 @@ else()
     target_compile_options(oamr_pairing PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+target_link_libraries(oamr_pairing PRIVATE Boost::beast Boost::asio Boost::system)
 if(WIN32)
     target_link_libraries(oamr_pairing PRIVATE ws2_32)
 endif()

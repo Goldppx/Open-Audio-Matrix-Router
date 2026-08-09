@@ -1,19 +1,23 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-family: Roboto, "Microsoft YaHei UI", system-ui, sans-serif;
-  --md-sys-color-primary: #d0bcff;
-  --md-sys-color-on-primary: #381e72;
-  --md-sys-color-primary-container: #4f378b;
-  --md-sys-color-on-primary-container: #e9ddff;
-  --md-sys-color-secondary-container: #4a4458;
-  --md-sys-color-on-secondary-container: #e8def8;
-  --md-sys-color-surface: #141218;
-  --md-sys-color-surface-container: #211f26;
-  --md-sys-color-surface-container-high: #2b2930;
-  --md-sys-color-on-surface: #e6e0e9;
-  --md-sys-color-on-surface-variant: #cac4d0;
-  --md-sys-color-outline: #938f99;
-  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-background: #fff8f4; --md-sys-color-on-background: #201b15;
+  --md-sys-color-surface: #fff8f4; --md-sys-color-surface-dim: #e3d8ce;
+  --md-sys-color-surface-bright: #fff8f4; --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #fef2e7; --md-sys-color-surface-container: #f8ece2;
+  --md-sys-color-surface-container-high: #f2e6dc; --md-sys-color-surface-container-highest: #ece0d7;
+  --md-sys-color-on-surface: #201b15; --md-sys-color-surface-variant: #f2dfcd;
+  --md-sys-color-on-surface-variant: #514538; --md-sys-color-inverse-surface: #362f29;
+  --md-sys-color-inverse-on-surface: #fbefe5; --md-sys-color-outline: #837566;
+  --md-sys-color-outline-variant: #d5c4b2; --md-sys-color-shadow: #000000; --md-sys-color-scrim: #000000;
+  --md-sys-color-surface-tint: #845401; --md-sys-color-primary: #845401; --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #ffc680; --md-sys-color-on-primary-container: #573500;
+  --md-sys-color-inverse-primary: #fcba65; --md-sys-color-secondary: #745938; --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #ffdeba; --md-sys-color-on-secondary-container: #5c4425;
+  --md-sys-color-tertiary: #5b6312; --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #cdd77a; --md-sys-color-on-tertiary-container: #3a4000;
+  --md-sys-color-error: #ba1a1a; --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6; --md-sys-color-on-error-container: #410002;
 }
 
 * { box-sizing: border-box; }
@@ -54,7 +58,7 @@ md-divider { margin: 18px 0; }
 .endpoint-chip { margin: 6px 4px 0 0; }
 .exposure-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 240px; overflow: auto; padding: 5px; }
 .exposure-row { display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 10px; background: var(--md-sys-color-surface-container-high); }
-.log { margin: 0; min-height: 28px; padding: 12px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; background: #0e0d11; border-radius: 12px; color: var(--md-sys-color-on-surface-variant); }
+.log { margin: 0; min-height: 28px; padding: 12px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; background: var(--md-sys-color-surface-container-lowest); border-radius: 12px; color: var(--md-sys-color-on-surface-variant); }
 .empty { color: var(--md-sys-color-on-surface-variant); padding: 16px 0; }
 .dialog-form { display: grid; gap: 13px; padding: 4px; min-width: min(400px, 80vw); }
 
