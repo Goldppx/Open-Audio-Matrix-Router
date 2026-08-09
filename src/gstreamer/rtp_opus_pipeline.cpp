@@ -54,7 +54,7 @@ std::string receiver_description(const audio::ReceiverSettings& settings) {
              // Opus channel count is signalled by RTP/Opus itself. A fixed
              // encoding-params=2 rejects valid mono sources on other hosts.
              << " caps=\"application/x-rtp,media=audio,encoding-name=OPUS,payload=96,clock-rate=48000\" "
-             << "! rtpjitterbuffer latency=" << network.jitter_buffer_ms
+             << "! rtpjitterbuffer name=receiver_jitter latency=" << network.jitter_buffer_ms
              << " drop-on-latency=" << (network.drop_on_latency ? "true" : "false")
              << " do-lost=true"
              << " ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! audioconvert ! "
@@ -272,6 +272,22 @@ void RtpOpusPipeline::stop() noexcept { impl_->stop(); }
 bool RtpOpusPipeline::poll() { return impl_->poll(); }
 bool RtpOpusPipeline::is_running() const noexcept { return impl_->pipeline != nullptr; }
 const std::string& RtpOpusPipeline::last_error() const noexcept { return impl_->error; }
+std::optional<audio::TransportTelemetry> RtpOpusPipeline::transport_telemetry() const noexcept {
+    if (impl_->pipeline == nullptr) return std::nullopt;
+    GstElement* jitter = gst_bin_get_by_name(GST_BIN(impl_->pipeline), "receiver_jitter");
+    if (jitter == nullptr) return std::nullopt;
+    GstStructure* stats = nullptr;
+    g_object_get(jitter, "stats", &stats, nullptr);
+    gst_object_unref(jitter);
+    if (stats == nullptr) return std::nullopt;
+    guint64 pushed{}, lost{};
+    const bool has_pushed = gst_structure_get_uint64(stats, "num-pushed", &pushed);
+    const bool has_lost = gst_structure_get_uint64(stats, "num-lost", &lost);
+    gst_structure_free(stats);
+    if (!has_pushed && !has_lost) return std::nullopt;
+    const auto total = pushed + lost;
+    return audio::TransportTelemetry{pushed, lost, total == 0 ? 0.0 : static_cast<double>(lost) * 100.0 / static_cast<double>(total)};
+}
 std::optional<audio::ResolvedNetworkProfile> RtpOpusPipeline::resolved_network_profile() const noexcept { return impl_->network_profile; }
 
 } // namespace oamr::gstreamer

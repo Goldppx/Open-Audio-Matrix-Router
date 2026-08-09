@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -199,6 +200,7 @@ public:
     std::size_t next_route_id{1};
     pairing::PairingService pairing;
     std::unique_ptr<audio::AudioBackend> backend;
+    std::chrono::steady_clock::time_point last_telemetry_sync{};
 
     Impl() : backend(audio::create_audio_backend()) {}
 
@@ -282,6 +284,32 @@ public:
     void stop_all_routes() {
         for (auto& item : routes) if (item.route) item.route->stop();
         routes.clear();
+    }
+
+    void poll_routes_and_sync_telemetry() {
+        for (auto& item : routes) {
+            if (item.enabled && item.route && !item.route->poll()) {
+                error = item.route->last_error();
+                item.route->stop();
+                item.enabled = false;
+            }
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_telemetry_sync < std::chrono::seconds(2)) return;
+        last_telemetry_sync = now;
+        for (const auto& item : routes) {
+            if (!item.enabled || !item.route || !item.network_profile) continue;
+            const auto live = item.route->transport_telemetry();
+            if (!live) continue;
+            pairing::AudioTelemetry telemetry;
+            telemetry.quality = quality_name(item.network_profile->quality);
+            telemetry.target_latency_ms = item.network_profile->max_latency_ms;
+            telemetry.packet_loss_percent = live->packet_loss_percent;
+            telemetry.device_name = item.label;
+            pairing.set_telemetry(std::move(telemetry));
+            pairing.announce();
+            return;
+        }
     }
 
     bool start_remote_command(const pairing::RemoteRouteRequest& request, std::string& route_error) {
@@ -451,7 +479,7 @@ public:
             settings.host = host->second; settings.port = udp_port; settings.source_device = source->second;
             settings.capture_render_device = params.contains("loopback") && params.at("loopback") == "true";
             settings.network = profile;
-            if (add_network_route("Send: " + source->second + " → " + settings.host + ":" + std::to_string(settings.port), profile, settings)) { pairing.set_telemetry({quality_name(profile.quality), profile.max_latency_ms, 0.0, source->second}); pairing.announce(); return "Network sender route added and telemetry synchronized."; }
+            if (add_network_route("Send: " + source->second + " → " + settings.host + ":" + std::to_string(settings.port), profile, settings)) { pairing.set_telemetry({quality_name(profile.quality), profile.max_latency_ms, -1.0, source->second}); pairing.announce(); return "Network sender route added and telemetry synchronized."; }
             return "Sender failed: " + error;
         }
         if (method == "POST" && target.rfind("/api/network/receive", 0) == 0) {
@@ -462,7 +490,7 @@ public:
                 || !network_profile_from(params, profile)) return "Invalid network receiver settings.";
             audio::ReceiverSettings settings;
             settings.port = udp_port; settings.sink_device = sink->second; settings.network = profile;
-            if (add_network_route("Receive: :" + std::to_string(settings.port) + " → " + sink->second, profile, settings)) { pairing.set_telemetry({quality_name(profile.quality), profile.max_latency_ms, 0.0, sink->second}); pairing.announce(); return "Network receiver route added and telemetry synchronized."; }
+            if (add_network_route("Receive: :" + std::to_string(settings.port) + " → " + sink->second, profile, settings)) { pairing.set_telemetry({quality_name(profile.quality), profile.max_latency_ms, -1.0, sink->second}); pairing.announce(); return "Network receiver route added and telemetry synchronized."; }
             return "Receiver failed: " + error;
         }
         if (method == "POST" && target.rfind("/api/matrix", 0) == 0) {
@@ -530,16 +558,17 @@ bool WebServer::serve(std::uint16_t port) {
     std::cout << "OAMR Web UI: http://127.0.0.1:" << port << "\nPress Ctrl+C to stop.\n";
     while (!impl_->stopping) {
         fd_set set; FD_ZERO(&set); FD_SET(listener, &set); timeval timeout{0, 200000};
-        if (select(static_cast<int>(listener + 1), &set, nullptr, nullptr, &timeout) <= 0) continue;
-        Socket client = accept(listener, nullptr, nullptr); if (client == kInvalidSocket) continue;
-        char buffer[8192]{}; const int length = recv(client, buffer, sizeof(buffer) - 1, 0);
-        std::string first_line(buffer, length > 0 ? static_cast<std::size_t>(length) : 0);
-        const auto end = first_line.find("\r\n"); first_line.resize(end == std::string::npos ? first_line.size() : end);
-        std::istringstream request(first_line); std::string method, target; request >> method >> target;
-        std::string type; const std::string body = impl_->handle(method, target, type);
-        const std::string response = "HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
-        send(client, response.data(), static_cast<int>(response.size()), 0); close_socket(client);
-        for (auto& item : impl_->routes) if (item.enabled && item.route && !item.route->poll()) { impl_->error = item.route->last_error(); item.route->stop(); item.enabled = false; }
+        if (select(static_cast<int>(listener + 1), &set, nullptr, nullptr, &timeout) > 0) {
+            Socket client = accept(listener, nullptr, nullptr); if (client == kInvalidSocket) continue;
+            char buffer[8192]{}; const int length = recv(client, buffer, sizeof(buffer) - 1, 0);
+            std::string first_line(buffer, length > 0 ? static_cast<std::size_t>(length) : 0);
+            const auto end = first_line.find("\r\n"); first_line.resize(end == std::string::npos ? first_line.size() : end);
+            std::istringstream request(first_line); std::string method, target; request >> method >> target;
+            std::string type; const std::string body = impl_->handle(method, target, type);
+            const std::string response = "HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+            send(client, response.data(), static_cast<int>(response.size()), 0); close_socket(client);
+        }
+        impl_->poll_routes_and_sync_telemetry();
     }
     close_socket(listener);
     impl_->pairing.stop();

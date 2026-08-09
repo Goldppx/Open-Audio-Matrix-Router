@@ -24,6 +24,7 @@ type Peer = {
 type Route = { id: number; label: string; enabled: boolean; network: boolean; quality?: Quality; latency?: number; mode?: Mode };
 type Checkable = HTMLElement & { checked: boolean };
 type ValueElement = HTMLElement & { value: string };
+type DialogElement = HTMLElement & { show: () => Promise<void>; close: () => Promise<void> };
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let devices: Devices = { sources: [], sinks: [] };
@@ -87,6 +88,11 @@ function selectOptions(items: Device[]): string {
   return items.map(item => `<md-select-option value="${escapeHtml(item.id)}"><div slot="headline">${escapeHtml(item.name)}</div></md-select-option>`).join('');
 }
 
+function tutorialContent(): string {
+  if (language === 'en') return `<div slot="headline">OAMR guide</div><div slot="content" class="tutorial-content"><section><h3>Start here</h3><p>Choose a source and a playback target in Audio matrix, then add the selected route.</p></section><section><h3>LAN audio</h3><p>Use Send to LAN and Receive from LAN for a direct RTP connection. For paired devices, select the remote endpoint directly in the matrix.</p></section><section><h3>Pair devices</h3><p>Expose local endpoints, generate a one-time code, then enter the other device IP and its code. Pairing control always uses port 8791.</p></section><section><h3>Route settings</h3><p>Use Configure in Route table to change quality, latency target, and mode after creating a network route.</p></section><section><h3>Telemetry</h3><p>Receiver-side packet loss is sampled from the active RTP jitter buffer and synchronized to paired devices. A dash means the route has no local receive leg yet.</p></section></div>`;
+  return `<div slot="headline">OAMR 使用说明</div><div slot="content" class="tutorial-content"><section><h3>快速开始</h3><p>在音频矩阵中选择来源与播放目标，然后添加已勾选的路线。</p></section><section><h3>局域网音频</h3><p>使用发送到局域网和从局域网接收创建直接 RTP 连接；已配对设备可直接在矩阵中选择远端端点。</p></section><section><h3>设备配对</h3><p>开放本机端点，生成一次性代码，然后输入另一台设备的 IP 与代码。配对控制固定使用 8791 端口。</p></section><section><h3>路线配置</h3><p>网络路线创建后，可在路由表中点击配置，调整音质、目标延迟和模式。</p></section><section><h3>遥测</h3><p>接收端会从活动 RTP 抖动缓冲区采样真实丢包率，并同步到已配对设备；横线表示本机尚无可采样的接收链路。</p></section></div>`;
+}
+
 function renderShell(): void {
   app.innerHTML = `
     <main class="app-shell">
@@ -107,7 +113,8 @@ function renderShell(): void {
         <section class="card wide"><h2>运行日志</h2><pre id="status" class="log">No log entries.</pre></section>
       </div>
     </main>
-    <md-dialog id="peerDialog"><div slot="headline">更新设备地址</div><form id="peerForm" slot="content" class="dialog-form" method="dialog"><md-outlined-text-field id="editHost" label="IP / 主机名"></md-outlined-text-field></form><div slot="actions"><md-text-button id="cancelPeer">取消</md-text-button><md-filled-button id="savePeer">保存</md-filled-button></div></md-dialog>`;
+    <md-dialog id="peerDialog"><div slot="headline">更新设备地址</div><form id="peerForm" slot="content" class="dialog-form" method="dialog"><md-outlined-text-field id="editHost" label="IP / 主机名"></md-outlined-text-field></form><div slot="actions"><md-text-button id="cancelPeer">取消</md-text-button><md-filled-button id="savePeer">保存</md-filled-button></div></md-dialog>
+    <md-dialog id="tutorialDialog">${tutorialContent()}<div slot="actions"><md-filled-button id="closeTutorial">${language === 'en' ? 'Got it' : '知道了'}</md-filled-button></div></md-dialog>`;
 }
 
 function renderDeviceControls(): void {
@@ -127,7 +134,8 @@ function enhancePanels(): void {
     const languageLabel = language === 'en' ? 'Choose language' : '选择语言';
     const controls = document.createElement('div');
     controls.className = 'header-controls';
-    controls.innerHTML = `<div class="language-control"><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.87 15.07 10.33 12.56l.03-.03A17.3 17.3 0 0 0 14.07 6h2.86V4h-7V2h-2v2H1v2h11.17a15.4 15.4 0 0 1-2.82 5.35A15.1 15.1 0 0 1 7.35 8.6h-2a17 17 0 0 0 2.73 4.17l-5.07 5.02L4.41 19.2l5-5 3.11 3.11.35-2.24ZM18.5 10h-2l-4.5 12h2l1.12-3h4.75L21 22h2l-4.5-12Zm-2.63 7 1.63-4.33L19.13 17h-3.26Z"/></svg></md-icon-button><div id="languageMenu" class="language-menu" role="menu" hidden><md-text-button data-language="zh-CN">中文</md-text-button><md-text-button data-language="en">English</md-text-button></div></div><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.91-.1-1.35A7 7 0 0 1 12 3Z"/></svg></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button>`;
+    const tutorialLabel = language === 'en' ? 'Open guide' : '打开教程';
+    controls.innerHTML = `<md-icon-button id="openTutorial" title="${tutorialLabel}" aria-label="${tutorialLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 18h2v-2h-2v2Zm1-16A10 10 0 1 0 12 22 10 10 0 0 0 12 2Zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8Zm0-14a3 3 0 0 0-3 3h2a1 1 0 1 1 1 1 3 3 0 0 0-1 5v1h2v-1a3 3 0 0 0-1-5 1 1 0 1 1 1-1h2a3 3 0 0 0-3-3Z"/></svg></md-icon-button><div class="language-control"><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.87 15.07 10.33 12.56l.03-.03A17.3 17.3 0 0 0 14.07 6h2.86V4h-7V2h-2v2H1v2h11.17a15.4 15.4 0 0 1-2.82 5.35A15.1 15.1 0 0 1 7.35 8.6h-2a17 17 0 0 0 2.73 4.17l-5.07 5.02L4.41 19.2l5-5 3.11 3.11.35-2.24ZM18.5 10h-2l-4.5 12h2l1.12-3h4.75L21 22h2l-4.5-12Zm-2.63 7 1.63-4.33L19.13 17h-3.26Z"/></svg></md-icon-button><div id="languageMenu" class="language-menu" role="menu" hidden><md-text-button data-language="zh-CN">中文</md-text-button><md-text-button data-language="en">English</md-text-button></div></div><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.91-.1-1.35A7 7 0 0 1 12 3Z"/></svg></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button>`;
     header.append(controls);
     const languageMenu = byId<HTMLElement>('languageMenu');
     const closeLanguageMenu = () => {
@@ -149,6 +157,15 @@ function enhancePanels(): void {
     document.addEventListener('click', event => { if (!byId<HTMLElement>('uiLanguage').contains(event.target as Node) && !languageMenu.contains(event.target as Node)) closeLanguageMenu(); });
     byId<HTMLElement>('themeToggle').addEventListener('click', () => { localStorage.setItem('oamr-theme', theme === 'dark' ? 'light' : 'dark'); window.location.reload(); });
     byId<HTMLElement>('refreshPage').addEventListener('click', () => window.location.reload());
+    byId<HTMLElement>('openTutorial').addEventListener('click', () => {
+      // MdDialog completes its opening sequence asynchronously. Calling its
+      // public API (rather than toggling an attribute) keeps focus trapping,
+      // Escape handling, and Material's enter/exit animation intact.
+      void byId<DialogElement>('tutorialDialog').show();
+    });
+    byId<HTMLElement>('closeTutorial').addEventListener('click', () => {
+      void byId<DialogElement>('tutorialDialog').close();
+    });
   }
   const log = byId<HTMLElement>('status');
   const logCard = log.closest('section');
@@ -289,7 +306,8 @@ function openRouteDialog(route: Route): void {
 
 function renderPeers(): void {
   byId<HTMLElement>('peerList').innerHTML = peers.length ? peers.map(peer => {
-    const telemetry = peer.telemetry.deviceName ? `音质 ${escapeHtml(peer.telemetry.quality)} · 目标延迟 ${peer.telemetry.latencyMs} ms · 丢包 ${peer.telemetry.packetLossPercent}% · 设备 ${escapeHtml(peer.telemetry.deviceName)}` : '当前没有传输音频';
+    const loss = peer.telemetry.packetLossPercent < 0 ? '—' : `${peer.telemetry.packetLossPercent.toFixed(2)}%`;
+    const telemetry = peer.telemetry.deviceName ? `音质 ${escapeHtml(peer.telemetry.quality)} · 目标延迟 ${peer.telemetry.latencyMs} ms · 丢包 ${loss} · 设备 ${escapeHtml(peer.telemetry.deviceName)}` : '当前没有传输音频';
     const endpoints = peer.endpoints.length ? peer.endpoints.map(endpoint => `<md-assist-chip class="endpoint-chip" label="${endpoint.direction === 'source' ? '来源' : '输出'} · ${escapeHtml(endpoint.name)}"></md-assist-chip>`).join('') : '<span class="muted">对方未开放设备</span>';
     return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><md-text-button data-edit-peer="${escapeHtml(peer.nodeId)}">更新地址</md-text-button></div><div class="muted">${escapeHtml(peer.host)}:8791</div><div class="muted">${telemetry}</div><div>${endpoints}</div></article>`;
   }).join('') : '<div class="empty">尚未配对设备。</div>';

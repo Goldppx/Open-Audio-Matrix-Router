@@ -150,6 +150,14 @@ struct NetworkFeedback {
     std::uint8_t packet_loss_percent{};
 };
 
+/** Live receiver-side RTP statistics. An empty value means the route has no
+ * RTP receive leg, so transport loss cannot be observed locally. */
+struct TransportTelemetry {
+    std::uint64_t received_packets{};
+    std::uint64_t lost_packets{};
+    double packet_loss_percent{};
+};
+
 /** One-step adaptation policy, deliberately rate-limited by its caller. */
 inline AudioQuality adapt_quality(AudioQuality current, const NetworkProfile& profile,
                                  const NetworkFeedback& feedback) {

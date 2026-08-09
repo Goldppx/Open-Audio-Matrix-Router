@@ -33,6 +33,7 @@ public:
     bool poll();
     [[nodiscard]] bool is_running() const noexcept;
     [[nodiscard]] const std::string& last_error() const noexcept;
+    [[nodiscard]] std::optional<audio::TransportTelemetry> transport_telemetry() const noexcept;
     [[nodiscard]] std::optional<audio::ResolvedNetworkProfile> resolved_network_profile() const noexcept;
 
 private:

@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,7 @@ public:
 
     [[nodiscard]] virtual bool is_running() const noexcept = 0;
     [[nodiscard]] virtual const std::string& last_error() const noexcept = 0;
+    [[nodiscard]] virtual std::optional<TransportTelemetry> transport_telemetry() const noexcept { return std::nullopt; }
 };
 
 /**
