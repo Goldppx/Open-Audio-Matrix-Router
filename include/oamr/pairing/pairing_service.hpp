@@ -79,6 +79,7 @@ public:
     bool pair_remote(const std::string& host, std::uint16_t port, const std::string& alias, const std::string& code);
     bool set_peer_alias(const std::string& node_id, std::string alias);
     bool set_peer_endpoint(const std::string& node_id, std::string host, std::uint16_t port);
+    bool remove_peer(const std::string& node_id);
     void set_remote_route_handler(std::function<bool(const RemoteRouteRequest&, std::string&)> handler);
     bool request_remote_route(const std::string& node_id, const RemoteRouteRequest& request);
     [[nodiscard]] std::vector<RemotePeer> peers() const;

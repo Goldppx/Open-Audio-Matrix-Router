@@ -36,6 +36,7 @@ let peerTopologyFingerprint = '';
 let routeFingerprint = '';
 let discoveryFingerprint = '';
 let deleteConfirmation: number | undefined;
+let peerDeleteConfirmation: string | undefined;
 let selectedRoute: Route | undefined;
 let localAlias = 'This computer';
 type LogLevel = 'VERBOSE' | 'INFO' | 'WARNING' | 'ERROR';
@@ -47,6 +48,18 @@ const escapeHtml = (value: unknown) => String(value).replace(/[&<>"']/g, char =>
 const byId = <T extends HTMLElement>(id: string) => document.querySelector<T>(`#${id}`)!;
 const value = (id: string) => (byId<ValueElement>(id).value ?? '').trim();
 const checked = (selector: string) => Array.from(document.querySelectorAll<Checkable>(selector)).filter(item => item.checked);
+const uiLabel = (zh: string, en: string) => language === 'en' ? en : zh;
+const iconButton = (attribute: string, label: string, path: string, className = '') => `<md-icon-button ${attribute} class="${className}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg></md-icon-button>`;
+const icons = {
+  addLink: 'M18 13c.56 0 1.08-.15 1.54-.39L13.5 6.57A4 4 0 0 0 12 6.05V8.1c.22.1.42.24.59.41l4.94 4.94c.15-.28.29-.42.47-.42ZM6.46 11.39 2.5 7.43 3.91 6.02l16.97 16.97-1.41 1.41-3.16-3.16a4 4 0 0 1-5.95-5.21l-2.49-2.49A4 4 0 0 1 6.46 11.39ZM7 14a2 2 0 1 0 2.83 2.83L7 14Zm5.4 5.4 1.42 1.42A4 4 0 0 1 8.18 15.2l1.42 1.42a2 2 0 0 0 2.8 2.78Z',
+  send: 'M2.01 21 23 12 2.01 3 2 10l15 2-15 2 .01 7Z',
+  receive: 'M19 3h2v6h-2V6.41l-5.29 5.3-1.42-1.42L17.59 5H15V3h4ZM5 15h2v2.59l5.29-5.3 1.42 1.42L8.41 19H11v2H5v-6Z',
+  edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z',
+  delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12ZM8 9h8v10H8V9Zm7.5-5-1-1h-5l-1 1H5v2h14V4h-3.5Z',
+  play: 'M8 5v14l11-7L8 5Z',
+  pause: 'M6 19h4V5H6v14Zm8-14v14h4V5h-4Z',
+  pair: 'M10.59 13.41 9.17 12l2.83-2.83 2.83 2.83-1.42 1.41L12 12l-1.41 1.41ZM7.05 16.95a5 5 0 0 1 0-7.07l2.12 2.12a2 2 0 0 0 0 2.83l-2.12 2.12ZM16.95 7.05a5 5 0 0 1 0 7.07l-2.12-2.12a2 2 0 0 0 0-2.83l2.12-2.12Z'
+};
 
 function logEvent(message: string, level: LogLevel = 'INFO'): void {
   logs.unshift({ level, message, time: new Date().toLocaleTimeString() });
@@ -129,18 +142,18 @@ function renderShell(): void {
       <div class="grid">
         <section class="card wide"><h2>路由表</h2><div id="routeTable" class="empty">正在加载路线…</div><div class="actions"><md-outlined-button id="stopAll">停止并清空所有路由</md-outlined-button></div></section>
 
-        <section class="card"><h2>发送到局域网</h2><div class="stack"><md-outlined-select id="networkSource" label="音频来源"></md-outlined-select><div class="form-grid"><md-outlined-text-field id="sendHost" label="IP / 主机名" value="127.0.0.1"></md-outlined-text-field><md-outlined-text-field id="sendPort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field></div><md-filled-button id="createSender">创建发送路线</md-filled-button></div></section>
-        <section class="card"><h2>从局域网接收</h2><div class="stack"><md-outlined-select id="receiveSink" label="播放到"></md-outlined-select><md-outlined-text-field id="receivePort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field><md-filled-button id="createReceiver">创建接收路线</md-filled-button></div></section>
+        <section class="card"><h2>发送到局域网</h2><div class="stack"><md-outlined-select id="networkSource" label="音频来源"></md-outlined-select><div class="form-grid"><md-outlined-text-field id="sendHost" label="IP / 主机名" value="127.0.0.1"></md-outlined-text-field><md-outlined-text-field id="sendPort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field></div><div class="icon-action">${iconButton('id="createSender"', uiLabel('创建发送路线', 'Create sender route'), icons.send)}</div></div></section>
+        <section class="card"><h2>从局域网接收</h2><div class="stack"><md-outlined-select id="receiveSink" label="播放到"></md-outlined-select><md-outlined-text-field id="receivePort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field><div class="icon-action">${iconButton('id="createReceiver"', uiLabel('创建接收路线', 'Create receiver route'), icons.receive)}</div></div></section>
 
-        <section class="card wide"><h2>音频矩阵</h2><div id="matrix" class="data-table-wrap"><div class="empty">正在加载设备…</div></div><div class="actions"><md-filled-button id="applyMatrix">添加已勾选的路线</md-filled-button></div></section>
+        <section class="card wide"><h2>音频矩阵</h2><div id="matrix" class="data-table-wrap"><div class="empty">正在加载设备…</div></div><div class="actions"><div class="icon-action">${iconButton('id="applyMatrix"', uiLabel('添加已勾选的路线', 'Add selected routes'), icons.addLink)}</div></div></section>
 
-        <section class="card wide"><h2>设备配对</h2><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="pairing-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly><md-icon-button id="newCode" class="code-action" slot="trailing-icon" title="${language === 'en' ? 'Generate code' : '生成新代码'}" aria-label="${language === 'en' ? 'Generate code' : '生成新代码'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button></md-outlined-text-field></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field></div></div><div class="actions"><md-filled-button id="pairRemote">开始配对</md-filled-button></div></section>
+        <section class="card wide"><h2>设备配对</h2><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="pairing-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly><md-icon-button id="newCode" class="code-action" slot="trailing-icon" title="${language === 'en' ? 'Generate code' : '生成新代码'}" aria-label="${language === 'en' ? 'Generate code' : '生成新代码'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button></md-outlined-text-field></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field></div></div><div class="actions"><div class="icon-action">${iconButton('id="pairRemote"', uiLabel('开始配对', 'Pair device'), icons.pair)}</div></div></section>
 
         <section class="card wide"><h2>已配对设备与传输遥测</h2><div id="peerList" class="empty">尚未配对设备。</div></section>
         <section class="card wide"><h2>运行日志</h2><pre id="status" class="log">No log entries.</pre></section>
       </div>
     </main>
-    <md-dialog id="peerDialog"><div slot="headline">更新设备地址</div><form id="peerForm" slot="content" class="dialog-form" method="dialog"><md-outlined-text-field id="editHost" label="IP / 主机名"></md-outlined-text-field></form><div slot="actions"><md-text-button id="cancelPeer">取消</md-text-button><md-filled-button id="savePeer">保存</md-filled-button></div></md-dialog>
+    <md-dialog id="peerDialog"><div slot="headline">编辑已配对设备</div><form id="peerForm" slot="content" class="dialog-form" method="dialog"><md-outlined-text-field id="editAlias" label="设备名称"></md-outlined-text-field><md-outlined-text-field id="editHost" label="IP / 主机名"></md-outlined-text-field></form><div slot="actions"><md-text-button id="cancelPeer">取消</md-text-button><md-filled-button id="savePeer">保存</md-filled-button></div></md-dialog>
     <md-dialog id="tutorialDialog">${tutorialContent()}<div slot="actions"><md-filled-button id="closeTutorial">${language === 'en' ? 'Got it' : '知道了'}</md-filled-button></div></md-dialog>`;
 }
 
@@ -291,7 +304,9 @@ function applyPreferences(): void {
     '来源 \\ 播放目标': 'Source \\ playback target', '暂不支持': 'Not supported', '禁用': 'Disabled', '当前没有传输音频': 'No active audio stream',
     '对方未开放设备': 'The peer exposes no devices', '尚未配对设备。': 'No paired devices.', '来源': 'Source', '输出': 'Output', '编辑': 'Edit',
     '传输属性': 'Transport properties', '路线': 'Route', '状态': 'Status', '操作': 'Actions', '低': 'Low', '中': 'Medium', '高': 'High',
-    '正在加载路线…': 'Loading routes…', '正在加载设备…': 'Loading devices…', '更新地址': 'Update address', '更新设备地址': 'Update device address', '网络': 'Network'
+    '正在加载路线…': 'Loading routes…', '正在加载设备…': 'Loading devices…', '更新地址': 'Update address', '更新设备地址': 'Update device address', '网络': 'Network',
+    '编辑已配对设备': 'Edit paired device', '设备名称': 'Device name', '局域网发现': 'LAN discovery', '发现不会公开网页或配对密钥。': 'Discovery does not expose the web UI or pairing codes.',
+    '启用发现': 'Enable discovery', '启用后会显示同一局域网中已启用发现的 OAMR 设备。': 'Enabled OAMR devices on this LAN appear here.', '正在搜索局域网中的 OAMR 设备…': 'Searching for OAMR devices on this LAN…'
   };
   const translate = (input: string) => dictionary[input.trim()] ?? input;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -337,8 +352,10 @@ function renderRoutes(routes: Route[]): void {
   const rows = routes.map(route => {
     const deleteText = deleteConfirmation === route.id ? '确认删除' : '删除';
     const deleteClass = deleteConfirmation === route.id ? 'danger-action' : '';
-    const configuration = route.network ? `<md-text-button data-config="${route.id}">配置</md-text-button>` : '';
-    return `<tr><td>${escapeHtml(route.label)}</td><td>${route.enabled ? '运行中' : '已暂停'}</td><td>${route.network ? `${route.quality} · ${route.latency} ms · ${route.mode}` : '本地路线'}</td><td><div class="route-actions"><md-text-button data-toggle="${route.id}" data-enabled="${!route.enabled}">${route.enabled ? '暂停' : '恢复'}</md-text-button>${configuration}<md-text-button class="${deleteClass}" data-delete="${route.id}">${deleteText}</md-text-button></div></td></tr>`;
+    const configuration = route.network ? iconButton(`data-config="${route.id}"`, uiLabel('配置路线', 'Configure route'), icons.edit) : '';
+    const toggle = iconButton(`data-toggle="${route.id}" data-enabled="${!route.enabled}"`, route.enabled ? uiLabel('暂停路线', 'Pause route') : uiLabel('恢复路线', 'Resume route'), route.enabled ? icons.pause : icons.play);
+    const deletion = iconButton(`data-delete="${route.id}"`, deleteConfirmation === route.id ? uiLabel('确认删除路线', 'Confirm route deletion') : uiLabel('删除路线', 'Delete route'), icons.delete, deleteClass);
+    return `<tr><td>${escapeHtml(route.label)}</td><td>${route.enabled ? '运行中' : '已暂停'}</td><td>${route.network ? `${route.quality} · ${route.latency} ms · ${route.mode}` : '本地路线'}</td><td><div class="route-actions">${toggle}${configuration}${deletion}</div></td></tr>`;
   }).join('');
   byId<HTMLElement>('routeTable').innerHTML = routes.length ? `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>路线</th><th>状态</th><th>传输属性</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">暂无路线。</div>';
   document.querySelectorAll<HTMLElement>('[data-toggle]').forEach(button => button.addEventListener('click', () => void post(`/api/routes/${button.dataset.toggle}/toggle?enabled=${button.dataset.enabled}`)));
@@ -377,9 +394,18 @@ function renderPeers(): void {
   byId<HTMLElement>('peerList').innerHTML = peers.length ? peers.map(peer => {
     const telemetry = peerTelemetryText(peer);
     const endpoints = peer.endpoints.length ? peer.endpoints.map(endpoint => `<md-assist-chip class="endpoint-chip" label="${endpoint.direction === 'source' ? '来源' : '输出'} · ${escapeHtml(endpoint.name)}"></md-assist-chip>`).join('') : '<span class="muted">对方未开放设备</span>';
-    return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><md-text-button data-edit-peer="${escapeHtml(peer.nodeId)}">更新地址</md-text-button></div><div class="muted">${escapeHtml(peer.host)}:8791</div><div class="muted peer-telemetry" data-telemetry-node="${escapeHtml(peer.nodeId)}">${telemetry}</div><div>${endpoints}</div></article>`;
+    const edit = iconButton(`data-edit-peer="${escapeHtml(peer.nodeId)}"`, uiLabel('编辑名称和地址', 'Edit name and address'), icons.edit);
+    const removal = iconButton(`data-delete-peer="${escapeHtml(peer.nodeId)}"`, peerDeleteConfirmation === peer.nodeId ? uiLabel('确认删除已配对设备', 'Confirm paired device deletion') : uiLabel('删除已配对设备', 'Delete paired device'), icons.delete, peerDeleteConfirmation === peer.nodeId ? 'danger-action' : '');
+    return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><span class="peer-actions">${edit}${removal}</span></div><div class="muted">${escapeHtml(peer.host)}:8791</div><div class="muted peer-telemetry" data-telemetry-node="${escapeHtml(peer.nodeId)}">${telemetry}</div><div>${endpoints}</div></article>`;
   }).join('') : '<div class="empty">尚未配对设备。</div>';
   document.querySelectorAll<HTMLElement>('[data-edit-peer]').forEach(button => button.addEventListener('click', () => openPeerDialog(button.dataset.editPeer!)));
+  document.querySelectorAll<HTMLElement>('[data-delete-peer]').forEach(button => button.addEventListener('click', () => void (async () => {
+    const nodeId = button.dataset.deletePeer!;
+    if (peerDeleteConfirmation !== nodeId) { peerDeleteConfirmation = nodeId; renderPeers(); return; }
+    peerDeleteConfirmation = undefined;
+    await post(`/api/pair/delete?node=${encodeURIComponent(nodeId)}`);
+    await refreshPeers();
+  })()));
   applyPreferences();
 }
 
@@ -410,9 +436,11 @@ function peerTopologyOf(items: Peer[]): string {
 function openPeerDialog(nodeId: string): void {
   const peer = peers.find(item => item.nodeId === nodeId);
   if (!peer) return;
+  byId<ValueElement>('editAlias').value = peer.alias;
   byId<ValueElement>('editHost').value = peer.host;
   byId<HTMLElement & { show: () => void }>('peerDialog').show();
   byId<HTMLElement>('savePeer').onclick = () => void (async () => {
+    await post(`/api/pair/alias?node=${encodeURIComponent(nodeId)}&alias=${encodeURIComponent(value('editAlias'))}`);
     await post(`/api/pair/endpoint?node=${encodeURIComponent(nodeId)}&host=${encodeURIComponent(value('editHost'))}&port=8791`);
     byId<HTMLElement & { close: () => void }>('peerDialog').close();
     await refreshPeers();

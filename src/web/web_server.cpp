@@ -436,6 +436,11 @@ public:
             if (node == query.end() || host == query.end() || port == query.end() || !parse_udp_port(port->second, pairing_port) || !pairing.set_peer_endpoint(node->second, host->second, pairing_port)) return "Could not update paired address.";
             return "Paired address saved.";
         }
+        if (method == "POST" && target.rfind("/api/pair/delete", 0) == 0) {
+            const auto query = query_params(target); const auto node = query.find("node");
+            if (node == query.end() || !pairing.remove_peer(node->second)) return "Could not remove paired device.";
+            return "Paired device removed.";
+        }
         if (method == "POST" && target.rfind("/api/paired/route", 0) == 0) {
             const auto query = query_params(target); const auto peer_id = query.find("peer"), kind = query.find("kind"), local_device = query.find("local"), remote_device = query.find("remote"), loopback = query.find("loopback");
             if (peer_id == query.end() || kind == query.end() || local_device == query.end() || remote_device == query.end()) return "Invalid paired matrix route.";

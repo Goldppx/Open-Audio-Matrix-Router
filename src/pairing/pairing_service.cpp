@@ -250,6 +250,10 @@ public:
             { std::lock_guard lock(mutex); const auto peer = known_peers.find(node->second); if (peer == known_peers.end()) return "error=unpaired-peer"; try { request.kind = kind->second == "send" ? RemoteRouteKind::Send : RemoteRouteKind::Receive; request.device_id = device->second; request.host = peer->second.host; request.port = static_cast<std::uint16_t>(std::stoul(port->second)); request.quality = quality->second; request.max_latency_ms = static_cast<std::uint16_t>(std::stoul(latency->second)); request.mode = mode->second; request.render_loopback = query.contains("loopback") && query.at("loopback") == "true"; handler = route_handler; } catch (...) { return "error=invalid-route"; } }
             std::string failure; return handler && handler(request, failure) ? "ok" : "error=" + escape(failure.empty() ? "route-not-available" : failure);
         }
+        if (target.rfind("/unpair?", 0) == 0) {
+            const auto node = query.find("node"); if (node == query.end()) return "error=invalid-request";
+            std::lock_guard lock(mutex); known_peers.erase(node->second); save_unlocked(); return "ok";
+        }
         if (target.rfind("/pair?", 0) != 0) return "error=not-found";
         const auto code = query.find("code"), node = query.find("node"), peer_alias = query.find("alias"), peer_port = query.find("port");
         if (code == query.end() || node == query.end() || peer_alias == query.end() || peer_port == query.end()) return "error=invalid-request";
@@ -354,6 +358,12 @@ bool PairingService::set_peer_endpoint(const std::string& node_id, std::string h
     std::lock_guard lock(impl_->mutex); const auto it = impl_->known_peers.find(node_id);
     if (it == impl_->known_peers.end() || host.empty() || port == 0) return false;
     it->second.host = std::move(host); it->second.port = port; impl_->save_unlocked(); return true;
+}
+bool PairingService::remove_peer(const std::string& node_id) {
+    RemotePeer peer; std::string local_node;
+    { std::lock_guard lock(impl_->mutex); const auto it = impl_->known_peers.find(node_id); if (it == impl_->known_peers.end()) return false; peer = it->second; local_node = impl_->node_id; impl_->known_peers.erase(it); impl_->save_unlocked(); }
+    std::thread([host = peer.host, port = peer.port, target = "/unpair?node=" + escape(local_node)] { (void)post_control(host, port, target); }).detach();
+    return true;
 }
 void PairingService::set_remote_route_handler(std::function<bool(const RemoteRouteRequest&, std::string&)> handler) { std::lock_guard lock(impl_->mutex); impl_->route_handler = std::move(handler); }
 bool PairingService::request_remote_route(const std::string& node_id, const RemoteRouteRequest& request) {
