@@ -95,7 +95,7 @@ md-divider { margin: 18px 0; }
 .log { margin: 0; height: 220px; padding: 12px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; background: var(--md-sys-color-surface-container-lowest); border-radius: 12px; color: var(--md-sys-color-on-surface-variant); }
 .danger-action { --md-text-button-label-text-color: var(--md-sys-color-error); --md-text-button-hover-label-text-color: var(--md-sys-color-error); --md-icon-button-icon-color: var(--md-sys-color-error); --md-icon-button-hover-icon-color: var(--md-sys-color-error); }
 .empty { color: var(--md-sys-color-on-surface-variant); padding: 16px 0; }
-.dialog-form { display: grid; gap: 13px; padding: 4px; min-width: min(400px, 80vw); }
+.dialog-form { display: grid; gap: 13px; padding: 2px 24px 10px; min-width: min(400px, calc(100vw - 72px)); }
 .tutorial-content { display: grid; gap: 12px; max-width: 620px; }
 .tutorial-content section { padding: 12px; border-radius: 14px; background: var(--md-sys-color-surface-container-high); animation: oamr-enter var(--oamr-motion) var(--oamr-ease) both; }
 .tutorial-content h3 { margin: 0 0 5px; font-size: 1rem; }
@@ -121,7 +121,7 @@ md-divider { margin: 18px 0; }
   .discovery-heading { align-items: flex-start; flex-direction: column; }
   .discovery-device { grid-template-columns: 1fr; }
   .discovery-device md-filled-button { width: 100%; }
-  .dialog-form { min-width: 0; width: min(100%, 360px); }
+  .dialog-form { width: min(100%, 360px); min-width: 0; padding-inline: 16px; }
   .tutorial-content { max-width: 100%; gap: 9px; }
   .tutorial-content section { padding: 10px; }
   .tutorial-content { max-height: 62vh; overflow-y: auto; padding-inline-end: 2px; }
