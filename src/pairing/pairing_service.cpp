@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -26,6 +27,8 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -46,6 +49,42 @@ void close_socket(Socket socket) { closesocket(socket); }
 using Socket = int; constexpr Socket kInvalidSocket = -1;
 void close_socket(Socket socket) { close(socket); }
 #endif
+
+struct IPv4Interface {
+    in_addr address{};
+    in_addr netmask{};
+};
+
+std::vector<IPv4Interface> active_ipv4_interfaces(Socket socket) {
+    std::vector<IPv4Interface> result;
+#ifdef _WIN32
+    INTERFACE_INFO interfaces[64]{};
+    DWORD bytes{};
+    if (WSAIoctl(socket, SIO_GET_INTERFACE_LIST, nullptr, 0, interfaces,
+                 sizeof(interfaces), &bytes, nullptr, nullptr) == SOCKET_ERROR) return result;
+    const auto count = bytes / sizeof(INTERFACE_INFO);
+    for (DWORD index = 0; index < count; ++index) {
+        const auto flags = interfaces[index].iiFlags;
+        if ((flags & IFF_UP) == 0 || (flags & IFF_LOOPBACK) != 0) continue;
+        const auto* address = reinterpret_cast<const sockaddr_in*>(&interfaces[index].iiAddress);
+        const auto* netmask = reinterpret_cast<const sockaddr_in*>(&interfaces[index].iiNetmask);
+        if (address->sin_family == AF_INET && address->sin_addr.s_addr != INADDR_ANY)
+            result.push_back({address->sin_addr, netmask->sin_addr});
+    }
+#else
+    ifaddrs* first{};
+    if (getifaddrs(&first) != 0) return result;
+    for (auto* entry = first; entry; entry = entry->ifa_next) {
+        if (!entry->ifa_addr || entry->ifa_addr->sa_family != AF_INET ||
+            (entry->ifa_flags & IFF_UP) == 0 || (entry->ifa_flags & IFF_LOOPBACK) != 0) continue;
+        const auto* address = reinterpret_cast<const sockaddr_in*>(entry->ifa_addr);
+        const auto* netmask = reinterpret_cast<const sockaddr_in*>(entry->ifa_netmask);
+        result.push_back({address->sin_addr, netmask ? netmask->sin_addr : in_addr{}});
+    }
+    freeifaddrs(first);
+#endif
+    return result;
+}
 
 std::string env_or(const char* name, const char* fallback) {
 #ifdef _WIN32
@@ -150,6 +189,7 @@ public:
     mutable std::mutex mutex;
     std::atomic_bool stopping{false}; std::thread worker; Socket listener{kInvalidSocket}; std::uint16_t listen_port{};
     std::atomic_bool discovery_stopping{true}; std::thread discovery_worker; Socket discovery_socket{kInvalidSocket}; bool discovery_enabled{};
+    std::vector<IPv4Interface> discovery_interfaces;
     std::string error, node_id{random_hex(24)}, alias{env_or("COMPUTERNAME", "This computer")}, pair_code; std::chrono::steady_clock::time_point code_expiry{};
     std::vector<ExposedEndpoint> exposed; AudioTelemetry local_telemetry; std::map<std::string, RemotePeer> known_peers;
     struct DiscoveryEntry { DiscoveredPeer peer; std::chrono::steady_clock::time_point seen; };
@@ -201,7 +241,21 @@ public:
                 { std::lock_guard lock(mutex); node = node_id; local_alias = alias; port = listen_port; }
                 const std::string message = "OAMR-DISCOVERY/1?node=" + escape(node) + "&alias=" + escape(local_alias) + "&port=" + std::to_string(port);
                 sockaddr_in target{}; target.sin_family = AF_INET; target.sin_port = htons(kDiscoveryPort); inet_pton(AF_INET, kDiscoveryGroup, &target.sin_addr);
-                sendto(discovery_socket, message.data(), static_cast<int>(message.size()), 0, reinterpret_cast<sockaddr*>(&target), sizeof(target));
+                for (const auto& interface : discovery_interfaces) {
+                    setsockopt(discovery_socket, IPPROTO_IP, IP_MULTICAST_IF,
+                               reinterpret_cast<const char*>(&interface.address), sizeof(interface.address));
+                    sendto(discovery_socket, message.data(), static_cast<int>(message.size()), 0,
+                           reinterpret_cast<sockaddr*>(&target), sizeof(target));
+
+                    // Directed broadcast is a fallback for LANs or Windows network
+                    // profiles that filter multicast while still allowing UDP broadcast.
+                    if (interface.netmask.s_addr != INADDR_ANY) {
+                        sockaddr_in broadcast = target;
+                        broadcast.sin_addr.s_addr = interface.address.s_addr | ~interface.netmask.s_addr;
+                        sendto(discovery_socket, message.data(), static_cast<int>(message.size()), 0,
+                               reinterpret_cast<sockaddr*>(&broadcast), sizeof(broadcast));
+                    }
+                }
                 next_announcement = now + std::chrono::seconds(2);
             }
             fd_set set; FD_ZERO(&set); FD_SET(discovery_socket, &set); timeval timeout{0, 200000};
@@ -228,10 +282,27 @@ public:
         discovery_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (discovery_socket == kInvalidSocket) { error = "Could not create discovery socket."; return false; }
         int reuse = 1; setsockopt(discovery_socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+        int broadcast = 1; setsockopt(discovery_socket, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char*>(&broadcast), sizeof(broadcast));
         sockaddr_in address{}; address.sin_family = AF_INET; address.sin_port = htons(kDiscoveryPort); address.sin_addr.s_addr = htonl(INADDR_ANY);
         if (bind(discovery_socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) { error = "Could not bind discovery port."; close_socket(discovery_socket); discovery_socket = kInvalidSocket; return false; }
-        ip_mreq membership{}; inet_pton(AF_INET, kDiscoveryGroup, &membership.imr_multiaddr); membership.imr_interface.s_addr = htonl(INADDR_ANY);
-        if (setsockopt(discovery_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, reinterpret_cast<const char*>(&membership), sizeof(membership)) != 0) { error = "Could not join discovery multicast group."; close_socket(discovery_socket); discovery_socket = kInvalidSocket; return false; }
+        discovery_interfaces = active_ipv4_interfaces(discovery_socket);
+        in_addr group{}; inet_pton(AF_INET, kDiscoveryGroup, &group);
+        std::size_t joined{};
+        for (const auto& interface : discovery_interfaces) {
+            ip_mreq membership{group, interface.address};
+            if (setsockopt(discovery_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                           reinterpret_cast<const char*>(&membership), sizeof(membership)) == 0) ++joined;
+        }
+        if (discovery_interfaces.empty() || joined == 0) {
+            in_addr any{};
+            any.s_addr = htonl(INADDR_ANY);
+            ip_mreq membership{group, any};
+            if (setsockopt(discovery_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                           reinterpret_cast<const char*>(&membership), sizeof(membership)) != 0) {
+                error = "Could not join discovery multicast group."; close_socket(discovery_socket); discovery_socket = kInvalidSocket; return false;
+            }
+            discovery_interfaces.push_back({any, any});
+        }
         unsigned char ttl = 1; setsockopt(discovery_socket, IPPROTO_IP, IP_MULTICAST_TTL, reinterpret_cast<const char*>(&ttl), sizeof(ttl));
         discovery_stopping = false; discovery_worker = std::thread([this] { discovery_loop(); }); return true;
     }
@@ -240,6 +311,7 @@ public:
         discovery_stopping = true;
         if (discovery_socket != kInvalidSocket) { close_socket(discovery_socket); discovery_socket = kInvalidSocket; }
         if (discovery_worker.joinable()) discovery_worker.join();
+        discovery_interfaces.clear();
         std::lock_guard lock(mutex); discovered.clear();
     }
 
