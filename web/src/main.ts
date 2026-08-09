@@ -36,6 +36,11 @@ type LogLevel = 'VERBOSE' | 'INFO' | 'WARNING' | 'ERROR';
 const logs: Array<{ level: LogLevel; message: string; time: string }> = [];
 const language = localStorage.getItem('oamr-language') === 'en' ? 'en' : 'zh-CN';
 const theme = localStorage.getItem('oamr-theme') === 'dark' ? 'dark' : 'light';
+const statusTranslations: Record<string, string> = {
+  '请至少选择一条矩阵路线。': 'Select at least one matrix route.', '请选择音频来源。': 'Select an audio source.',
+  '已生成一次性配对代码；十分钟内有效。': 'One-time pairing code generated. It expires in ten minutes.',
+  '再次点击“确认删除”才会移除此路线。': 'Click Confirm delete again to remove this route.'
+};
 
 const escapeHtml = (value: unknown) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]!);
 const byId = <T extends HTMLElement>(id: string) => document.querySelector<T>(`#${id}`)!;
@@ -49,7 +54,7 @@ function logEvent(message: string, level: LogLevel = 'INFO'): void {
 
 function setStatus(message: string, _level: LogLevel = 'INFO'): void {
   const notice = document.querySelector<HTMLElement>('#uiNotice');
-  if (notice) notice.textContent = message;
+  if (notice) notice.textContent = language === 'en' ? (statusTranslations[message] ?? message) : message;
 }
 
 function renderLogs(): void {
@@ -102,7 +107,7 @@ function renderShell(): void {
 
         <section class="card wide"><h2>音频矩阵</h2><div id="matrix" class="data-table-wrap"><div class="empty">正在加载设备…</div></div><div class="actions"><md-filled-button id="applyMatrix">添加已勾选的路线</md-filled-button></div></section>
 
-        <section class="card wide"><h2>设备配对</h2><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="pairing-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly></md-outlined-text-field><md-outlined-button id="newCode">生成新代码</md-outlined-button></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field></div></div><div class="actions"><md-filled-button id="pairRemote">开始配对</md-filled-button></div></section>
+        <section class="card wide"><h2>设备配对</h2><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="pairing-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly><md-icon-button id="newCode" class="code-action" slot="trailing-icon" title="${language === 'en' ? 'Generate code' : '生成新代码'}" aria-label="${language === 'en' ? 'Generate code' : '生成新代码'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button></md-outlined-text-field></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field></div></div><div class="actions"><md-filled-button id="pairRemote">开始配对</md-filled-button></div></section>
 
         <section class="card wide"><h2>已配对设备与传输遥测</h2><div id="peerList" class="empty">尚未配对设备。</div></section>
         <section class="card wide"><h2>运行日志</h2><pre id="status" class="log">No log entries.</pre></section>
@@ -151,14 +156,18 @@ function enhancePanels(): void {
   const exposure = byId<HTMLElement>('exposure');
   const save = byId<HTMLElement>('saveProfile');
   if (!exposure.parentElement?.querySelector('.exposure-details')) {
-    const details = document.createElement('details');
+    const details = document.createElement('section');
     details.className = 'exposure-details';
-    details.innerHTML = '<summary>选择要向已配对设备开放的本机端点</summary><div class="exposure-content"></div>';
+    details.innerHTML = '<button class="exposure-toggle" type="button" aria-expanded="false"><span>选择要向已配对设备开放的本机端点</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41Z"/></svg></button><div class="exposure-content"></div>';
     exposure.replaceWith(details);
     const content = details.querySelector<HTMLElement>('.exposure-content')!;
     content.append(exposure);
     save.parentElement?.replaceWith(save);
     content.append(save);
+    details.querySelector<HTMLButtonElement>('.exposure-toggle')!.addEventListener('click', () => {
+      const expanded = details.classList.toggle('open');
+      details.querySelector<HTMLButtonElement>('.exposure-toggle')!.setAttribute('aria-expanded', String(expanded));
+    });
   }
 }
 
@@ -189,15 +198,16 @@ function applyPreferences(): void {
     '另一台设备的 IP / 主机名': 'Other device IP / host name', 'TCP 端口': 'TCP port', '别名': 'Alias', '对方的一次性代码': 'Peer one-time code',
     '来源 \\ 播放目标': 'Source \\ playback target', '暂不支持': 'Not supported', '禁用': 'Disabled', '当前没有传输音频': 'No active audio stream',
     '对方未开放设备': 'The peer exposes no devices', '尚未配对设备。': 'No paired devices.', '来源': 'Source', '输出': 'Output', '编辑': 'Edit',
-    '传输属性': 'Transport properties', '路线': 'Route', '状态': 'Status', '操作': 'Actions', '低': 'Low', '中': 'Medium', '高': 'High'
+    '传输属性': 'Transport properties', '路线': 'Route', '状态': 'Status', '操作': 'Actions', '低': 'Low', '中': 'Medium', '高': 'High',
+    '正在加载路线…': 'Loading routes…', '正在加载设备…': 'Loading devices…', '更新地址': 'Update address', '更新设备地址': 'Update device address', '网络': 'Network'
   };
   const translate = (input: string) => dictionary[input.trim()] ?? input;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = []; let node: Node | null;
   while ((node = walker.nextNode())) nodes.push(node as Text);
   nodes.forEach(item => { const replacement = translate(item.data); if (replacement !== item.data) item.data = replacement; });
-  document.querySelectorAll<HTMLElement>('[label],[placeholder]').forEach(element => {
-    for (const attribute of ['label', 'placeholder']) {
+  document.querySelectorAll<HTMLElement>('[label],[placeholder],[title],[aria-label]').forEach(element => {
+    for (const attribute of ['label', 'placeholder', 'title', 'aria-label']) {
       const current = element.getAttribute(attribute); if (current) element.setAttribute(attribute, translate(current));
     }
   });
@@ -362,7 +372,7 @@ async function start(): Promise<void> {
     window.setInterval(() => { void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); }, 5000);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setStatus(`加载失败：${message}`);
+    setStatus(language === 'en' ? `Loading failed: ${message}` : `加载失败：${message}`);
     logEvent(`Startup failed: ${message}`, 'ERROR');
   }
 }
