@@ -1,6 +1,7 @@
 package com.gem.oamr
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -132,7 +133,10 @@ fun OAMRApp(activity: ComponentActivity) {
                         Text("地址：${androidNode.localIpv4().joinToString().ifBlank { "未连接局域网" }}:8791")
                         Text("一次性代码：$androidCode")
                         Text(androidNodeStatus, style = MaterialTheme.typography.bodySmall)
-                        Button(onClick = { androidNodeStatus = androidNode.start() }) { Text("启动配对服务") }
+                        Button(onClick = {
+                            ContextCompat.startForegroundService(activity, Intent(activity, com.gem.oamr.peer.OamrNodeService::class.java))
+                            androidNodeStatus = androidNode.start()
+                        }) { Text("启动常驻节点服务") }
                         OutlinedButton(onClick = { androidCode = androidNode.newPairCode() }) { Text("生成新代码") }
                         OutlinedTextField(androidPairHost, { androidPairHost = it }, label = { Text("桌面 OAMR IP 地址") }, singleLine = true)
                         OutlinedTextField(androidPairCode, { androidPairCode = it }, label = { Text("桌面一次性代码") }, singleLine = true)
