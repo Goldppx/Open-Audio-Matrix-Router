@@ -78,7 +78,12 @@ md-outlined-text-field, md-filled-select { width: 100%; }
 md-outlined-select { width: 100%; }
 md-divider { margin: 18px 0; }
 
-.data-table-wrap { overflow-x: auto; border: 1px solid var(--md-sys-color-outline); border-radius: 14px; }
+.data-table-wrap { overflow: auto; border: 1px solid var(--md-sys-color-outline); border-radius: 14px; background: var(--md-sys-color-surface-container-lowest); scrollbar-color: var(--md-sys-color-outline) var(--md-sys-color-surface-container-high); scrollbar-width: thin; scrollbar-gutter: stable; }
+.data-table-wrap, .exposure-list, .log, .tutorial-content { scrollbar-color: var(--md-sys-color-outline) var(--md-sys-color-surface-container-high); scrollbar-width: thin; }
+.data-table-wrap::-webkit-scrollbar, .exposure-list::-webkit-scrollbar, .log::-webkit-scrollbar, .tutorial-content::-webkit-scrollbar { width: 12px; height: 12px; }
+.data-table-wrap::-webkit-scrollbar-track, .exposure-list::-webkit-scrollbar-track, .log::-webkit-scrollbar-track, .tutorial-content::-webkit-scrollbar-track { margin: 5px; border-radius: 999px; background: var(--md-sys-color-surface-container-high); }
+.data-table-wrap::-webkit-scrollbar-thumb, .exposure-list::-webkit-scrollbar-thumb, .log::-webkit-scrollbar-thumb, .tutorial-content::-webkit-scrollbar-thumb { min-height: 28px; border: 3px solid var(--md-sys-color-surface-container-high); border-radius: 999px; background: var(--md-sys-color-outline); }
+.data-table-wrap::-webkit-scrollbar-thumb:hover, .exposure-list::-webkit-scrollbar-thumb:hover, .log::-webkit-scrollbar-thumb:hover, .tutorial-content::-webkit-scrollbar-thumb:hover { background: var(--md-sys-color-primary); }
 .data-table { border-collapse: collapse; width: 100%; min-width: 740px; }
 .data-table, .peer-card { animation: oamr-enter var(--oamr-motion) var(--oamr-ease) both; }
 .data-table th, .data-table td { padding: 12px; border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline) 45%, transparent); text-align: left; vertical-align: middle; }
