@@ -21,6 +21,8 @@ type Peer = {
   nodeId: string; alias: string; host: string; port: number; endpoints: Endpoint[];
   telemetry: { quality: string; latencyMs: number; packetLossPercent: number; deviceName: string };
 };
+type DiscoveredDevice = { nodeId: string; alias: string; host: string; port: number };
+type DiscoveryState = { enabled: boolean; devices: DiscoveredDevice[] };
 type Route = { id: number; label: string; enabled: boolean; network: boolean; quality?: Quality; latency?: number; mode?: Mode };
 type Checkable = HTMLElement & { checked: boolean };
 type ValueElement = HTMLElement & { value: string };
@@ -32,6 +34,7 @@ let peers: Peer[] = [];
 let matrixDirty = false;
 let peerTopologyFingerprint = '';
 let routeFingerprint = '';
+let discoveryFingerprint = '';
 let deleteConfirmation: number | undefined;
 let selectedRoute: Route | undefined;
 let localAlias = 'This computer';
@@ -150,6 +153,31 @@ function renderDeviceControls(): void {
   ].join('');
 }
 
+function renderDiscovery(state: DiscoveryState): void {
+  const list = byId<HTMLElement>('discoveryList');
+  list.innerHTML = state.enabled
+    ? (state.devices.length ? state.devices.map(device => `<article class="discovery-device" data-host="${escapeHtml(device.host)}" data-port="${device.port}" data-alias="${escapeHtml(device.alias)}"><div><strong>${escapeHtml(device.alias)}</strong><div class="muted">${escapeHtml(device.host)}:${device.port}</div></div><md-outlined-text-field class="discovery-code" label="一次性配对代码"></md-outlined-text-field><md-filled-button class="pair-discovered">配对</md-filled-button></article>`).join('') : '<div class="empty">正在搜索局域网中的 OAMR 设备…</div>')
+    : '<div class="muted">启用后会显示同一局域网中已启用发现的 OAMR 设备。</div>';
+  document.querySelectorAll<HTMLElement>('.pair-discovered').forEach(button => button.addEventListener('click', () => void (async () => {
+    const item = button.closest<HTMLElement>('.discovery-device'); const code = item?.querySelector<ValueElement>('.discovery-code')?.value.trim() ?? '';
+    if (!item || !code) { logEvent('A one-time pairing code is required.', 'WARNING'); return; }
+    const query = new URLSearchParams({ host: item.dataset.host!, port: item.dataset.port!, alias: localAlias, code });
+    const message = await post(`/api/pair/connect?${query}`);
+    if (message.startsWith('Pairing succeeded')) { await Promise.all([refreshPeers(), refreshDiscovery()]); }
+  })()));
+  applyPreferences();
+}
+
+async function refreshDiscovery(): Promise<void> {
+  const next = JSON.parse(await request('/api/discovery')) as DiscoveryState;
+  const fingerprint = JSON.stringify(next);
+  if (fingerprint === discoveryFingerprint) return;
+  discoveryFingerprint = fingerprint;
+  const toggle = document.querySelector<Checkable>('#discoveryToggle');
+  if (toggle) toggle.checked = next.enabled;
+  renderDiscovery(next);
+}
+
 function enhancePanels(): void {
   const header = document.querySelector<HTMLElement>('.app-header');
   if (header && !document.querySelector('#uiLanguage')) {
@@ -217,6 +245,21 @@ function enhancePanels(): void {
       const expanded = details.classList.toggle('open');
       details.querySelector<HTMLButtonElement>('.exposure-toggle')!.setAttribute('aria-expanded', String(expanded));
     });
+  }
+  const pairingCard = exposure.closest<HTMLElement>('.card');
+  const exposureDetails = exposure.closest<HTMLElement>('.exposure-details');
+  if (pairingCard && exposureDetails && !document.querySelector('#discoveryPanel')) {
+    const panel = document.createElement('section');
+    panel.id = 'discoveryPanel';
+    panel.className = 'discovery-panel';
+    panel.innerHTML = '<div class="discovery-heading"><div><h3>局域网发现</h3><p class="muted">发现不会公开网页或配对密钥。</p></div><label class="discovery-toggle"><md-checkbox id="discoveryToggle"></md-checkbox><span>启用发现</span></label></div><div id="discoveryList"></div>';
+    pairingCard.insertBefore(panel, exposureDetails);
+    byId<HTMLElement>('discoveryToggle').addEventListener('change', () => void (async () => {
+      const enabled = byId<Checkable>('discoveryToggle').checked;
+      await post(`/api/discovery?enabled=${enabled}`);
+      discoveryFingerprint = '';
+      await refreshDiscovery();
+    })());
   }
 }
 
@@ -454,8 +497,8 @@ async function start(): Promise<void> {
     const local = JSON.parse(await request('/api/pair/local')) as { alias: string };
     localAlias = local.alias;
     renderDeviceControls();
-    await Promise.all([refreshPeers(), refreshRoutes()]);
-    window.setInterval(() => { void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); }, 5000);
+    await Promise.all([refreshPeers(), refreshRoutes(), refreshDiscovery()]);
+    window.setInterval(() => { void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); void refreshDiscovery().catch(() => undefined); }, 3000);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setStatus(language === 'en' ? `Loading failed: ${message}` : `加载失败：${message}`);

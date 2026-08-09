@@ -12,6 +12,7 @@
 #include <mutex>
 #include <random>
 #include <sstream>
+#include <string_view>
 #include <thread>
 
 #include <boost/asio/connect.hpp>
@@ -36,6 +37,8 @@ namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace http = beast::http;
 using tcp = asio::ip::tcp;
+constexpr std::uint16_t kDiscoveryPort = 8792;
+constexpr char kDiscoveryGroup[] = "239.255.79.77";
 #ifdef _WIN32
 using Socket = SOCKET; constexpr Socket kInvalidSocket = INVALID_SOCKET;
 void close_socket(Socket socket) { closesocket(socket); }
@@ -146,8 +149,11 @@ class PairingService::Impl {
 public:
     mutable std::mutex mutex;
     std::atomic_bool stopping{false}; std::thread worker; Socket listener{kInvalidSocket}; std::uint16_t listen_port{};
+    std::atomic_bool discovery_stopping{true}; std::thread discovery_worker; Socket discovery_socket{kInvalidSocket}; bool discovery_enabled{};
     std::string error, node_id{random_hex(24)}, alias{env_or("COMPUTERNAME", "This computer")}, pair_code; std::chrono::steady_clock::time_point code_expiry{};
     std::vector<ExposedEndpoint> exposed; AudioTelemetry local_telemetry; std::map<std::string, RemotePeer> known_peers;
+    struct DiscoveryEntry { DiscoveredPeer peer; std::chrono::steady_clock::time_point seen; };
+    mutable std::map<std::string, DiscoveryEntry> discovered;
     std::function<bool(const RemoteRouteRequest&, std::string&)> route_handler;
 
     std::filesystem::path state_path() const { return std::filesystem::current_path() / "oamr-pairing-state.txt"; }
@@ -156,6 +162,7 @@ public:
         if (!file) return;
         file << "node\t" << escape(node_id) << "\n";
         file << "alias\t" << escape(alias) << "\n";
+        file << "discovery\t" << (discovery_enabled ? "1" : "0") << "\n";
         for (const auto& endpoint : exposed)
             file << "endpoint\t" << (endpoint.direction == EndpointDirection::Source ? 'S' : 'K') << '\t' << escape(endpoint.backend_id) << '\t' << escape(endpoint.name) << "\n";
         file << "telemetry\t" << escape(serialize_telemetry(local_telemetry)) << "\n";
@@ -169,10 +176,62 @@ public:
             while (std::getline(parts, part, '\t')) fields.push_back(part);
             if (fields.size() >= 2 && fields[0] == "node") node_id = unescape(fields[1]);
             else if (fields.size() >= 2 && fields[0] == "alias") alias = unescape(fields[1]);
+            else if (fields.size() >= 2 && fields[0] == "discovery") discovery_enabled = fields[1] == "1";
             else if (fields.size() >= 4 && fields[0] == "endpoint") exposed.push_back({unescape(fields[2]), unescape(fields[3]), fields[1] == "S" ? EndpointDirection::Source : EndpointDirection::Sink});
             else if (fields.size() >= 2 && fields[0] == "telemetry") local_telemetry = deserialize_telemetry(unescape(fields[1]));
             else if (fields.size() >= 6 && fields[0] == "peer") { try { RemotePeer peer{unescape(fields[1]), unescape(fields[2]), unescape(fields[3]), static_cast<std::uint16_t>(std::stoul(fields[4])), deserialize(unescape(fields[5]))}; if (fields.size() >= 7) peer.telemetry = deserialize_telemetry(unescape(fields[6])); known_peers[peer.node_id] = std::move(peer); } catch (...) {} }
         }
+    }
+
+    void discovery_loop() {
+        auto next_announcement = std::chrono::steady_clock::time_point{};
+        while (!discovery_stopping) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= next_announcement) {
+                std::string node, local_alias; std::uint16_t port{};
+                { std::lock_guard lock(mutex); node = node_id; local_alias = alias; port = listen_port; }
+                const std::string message = "OAMR-DISCOVERY/1?node=" + escape(node) + "&alias=" + escape(local_alias) + "&port=" + std::to_string(port);
+                sockaddr_in target{}; target.sin_family = AF_INET; target.sin_port = htons(kDiscoveryPort); inet_pton(AF_INET, kDiscoveryGroup, &target.sin_addr);
+                sendto(discovery_socket, message.data(), static_cast<int>(message.size()), 0, reinterpret_cast<sockaddr*>(&target), sizeof(target));
+                next_announcement = now + std::chrono::seconds(2);
+            }
+            fd_set set; FD_ZERO(&set); FD_SET(discovery_socket, &set); timeval timeout{0, 200000};
+            if (select(static_cast<int>(discovery_socket + 1), &set, nullptr, nullptr, &timeout) <= 0) continue;
+            char buffer[1024]{}; sockaddr_in sender{}; socklen_t size = sizeof(sender);
+            const int received = recvfrom(discovery_socket, buffer, sizeof(buffer) - 1, 0, reinterpret_cast<sockaddr*>(&sender), &size);
+            if (received <= 0) continue;
+            const std::string message(buffer, static_cast<std::size_t>(received));
+            constexpr std::string_view prefix{"OAMR-DISCOVERY/1?"};
+            if (!message.starts_with(prefix)) continue;
+            const auto query = params("?" + message.substr(prefix.size()));
+            const auto node = query.find("node"), remote_alias = query.find("alias"), remote_port = query.find("port");
+            if (node == query.end() || remote_alias == query.end() || remote_port == query.end()) continue;
+            unsigned port{}; try { port = static_cast<unsigned>(std::stoul(remote_port->second)); } catch (...) { continue; }
+            if (port == 0 || port > 65535) continue;
+            char host[INET_ADDRSTRLEN]{}; inet_ntop(AF_INET, &sender.sin_addr, host, sizeof(host));
+            std::lock_guard lock(mutex);
+            if (node->second != node_id) discovered[node->second] = {{node->second, remote_alias->second, host, static_cast<std::uint16_t>(port)}, std::chrono::steady_clock::now()};
+        }
+    }
+
+    bool start_discovery() {
+        if (discovery_socket != kInvalidSocket) return true;
+        discovery_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (discovery_socket == kInvalidSocket) { error = "Could not create discovery socket."; return false; }
+        int reuse = 1; setsockopt(discovery_socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+        sockaddr_in address{}; address.sin_family = AF_INET; address.sin_port = htons(kDiscoveryPort); address.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (bind(discovery_socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) { error = "Could not bind discovery port."; close_socket(discovery_socket); discovery_socket = kInvalidSocket; return false; }
+        ip_mreq membership{}; inet_pton(AF_INET, kDiscoveryGroup, &membership.imr_multiaddr); membership.imr_interface.s_addr = htonl(INADDR_ANY);
+        if (setsockopt(discovery_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, reinterpret_cast<const char*>(&membership), sizeof(membership)) != 0) { error = "Could not join discovery multicast group."; close_socket(discovery_socket); discovery_socket = kInvalidSocket; return false; }
+        unsigned char ttl = 1; setsockopt(discovery_socket, IPPROTO_IP, IP_MULTICAST_TTL, reinterpret_cast<const char*>(&ttl), sizeof(ttl));
+        discovery_stopping = false; discovery_worker = std::thread([this] { discovery_loop(); }); return true;
+    }
+
+    void stop_discovery() noexcept {
+        discovery_stopping = true;
+        if (discovery_socket != kInvalidSocket) { close_socket(discovery_socket); discovery_socket = kInvalidSocket; }
+        if (discovery_worker.joinable()) discovery_worker.join();
+        std::lock_guard lock(mutex); discovered.clear();
     }
 
     std::string handle(const std::string& target, const std::string& host) {
@@ -228,9 +287,11 @@ bool PairingService::start(std::uint16_t port) {
     impl_->listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); if (impl_->listener == kInvalidSocket) { impl_->error = "Could not create pairing socket."; return false; }
     sockaddr_in address{}; address.sin_family = AF_INET; address.sin_port = htons(port); address.sin_addr.s_addr = htonl(INADDR_ANY);
     if (bind(impl_->listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || listen(impl_->listener, 8) != 0) { impl_->error = "Could not bind pairing port."; close_socket(impl_->listener); impl_->listener = kInvalidSocket; return false; }
-    impl_->listen_port = port; impl_->stopping = false; impl_->worker = std::thread([this] { impl_->serve(); }); return true;
+    impl_->listen_port = port; impl_->stopping = false; impl_->worker = std::thread([this] { impl_->serve(); });
+    if (impl_->discovery_enabled && !impl_->start_discovery()) impl_->discovery_enabled = false;
+    return true;
 }
-void PairingService::stop() noexcept { impl_->stopping = true; if (impl_->listener != kInvalidSocket) { close_socket(impl_->listener); impl_->listener = kInvalidSocket; } if (impl_->worker.joinable()) impl_->worker.join(); }
+void PairingService::stop() noexcept { impl_->stop_discovery(); impl_->stopping = true; if (impl_->listener != kInvalidSocket) { close_socket(impl_->listener); impl_->listener = kInvalidSocket; } if (impl_->worker.joinable()) impl_->worker.join(); }
 const std::string& PairingService::last_error() const noexcept { return impl_->error; }
 std::uint16_t PairingService::port() const noexcept { return impl_->listen_port; }
 void PairingService::set_local_alias(std::string alias) { std::lock_guard lock(impl_->mutex); impl_->alias = std::move(alias); impl_->save_unlocked(); }
@@ -239,6 +300,25 @@ void PairingService::set_exposed_endpoints(std::vector<ExposedEndpoint> endpoint
 std::vector<ExposedEndpoint> PairingService::exposed_endpoints() const { std::lock_guard lock(impl_->mutex); return impl_->exposed; }
 std::string PairingService::create_pair_code() { std::lock_guard lock(impl_->mutex); impl_->pair_code = random_hex(6); std::transform(impl_->pair_code.begin(), impl_->pair_code.end(), impl_->pair_code.begin(), [](unsigned char c) { return static_cast<char>(::toupper(c)); }); impl_->code_expiry = std::chrono::steady_clock::now() + std::chrono::minutes(10); return impl_->pair_code; }
 std::vector<RemotePeer> PairingService::peers() const { std::lock_guard lock(impl_->mutex); std::vector<RemotePeer> result; for (const auto& [_, peer] : impl_->known_peers) result.push_back(peer); return result; }
+bool PairingService::set_discovery_enabled(bool enabled) {
+    if (enabled) {
+        { std::lock_guard lock(impl_->mutex); impl_->discovery_enabled = true; impl_->save_unlocked(); }
+        if (impl_->listener == kInvalidSocket || impl_->start_discovery()) return true;
+        std::lock_guard lock(impl_->mutex); impl_->discovery_enabled = false; impl_->save_unlocked(); return false;
+    }
+    impl_->stop_discovery();
+    std::lock_guard lock(impl_->mutex); impl_->discovery_enabled = false; impl_->save_unlocked(); return true;
+}
+bool PairingService::discovery_enabled() const { std::lock_guard lock(impl_->mutex); return impl_->discovery_enabled; }
+std::vector<DiscoveredPeer> PairingService::discovered_peers() const {
+    const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(7);
+    std::lock_guard lock(impl_->mutex); std::vector<DiscoveredPeer> result;
+    for (auto it = impl_->discovered.begin(); it != impl_->discovered.end();) {
+        if (it->second.seen < cutoff) it = impl_->discovered.erase(it);
+        else { result.push_back(it->second.peer); ++it; }
+    }
+    return result;
+}
 void PairingService::set_telemetry(AudioTelemetry telemetry) { std::lock_guard lock(impl_->mutex); impl_->local_telemetry = std::move(telemetry); impl_->save_unlocked(); }
 AudioTelemetry PairingService::telemetry() const { std::lock_guard lock(impl_->mutex); return impl_->local_telemetry; }
 

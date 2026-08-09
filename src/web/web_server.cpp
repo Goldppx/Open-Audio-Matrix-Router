@@ -383,6 +383,12 @@ public:
         }
         if (method == "GET" && target.rfind("/api/pair/code", 0) == 0) return pairing.create_pair_code();
         if (method == "GET" && target.rfind("/api/pair/local", 0) == 0) { type = "application/json; charset=utf-8"; return "{\"alias\":\"" + json_escape(pairing.local_alias()) + "\"}"; }
+        if (method == "GET" && target.rfind("/api/discovery", 0) == 0) {
+            type = "application/json; charset=utf-8"; std::ostringstream out;
+            out << "{\"enabled\":" << (pairing.discovery_enabled() ? "true" : "false") << ",\"devices\":["; bool first = true;
+            for (const auto& device : pairing.discovered_peers()) { if (!first) out << ','; first = false; out << "{\"nodeId\":\"" << json_escape(device.node_id) << "\",\"alias\":\"" << json_escape(device.alias) << "\",\"host\":\"" << json_escape(device.host) << "\",\"port\":" << device.port << '}'; }
+            return out << "]}", out.str();
+        }
         if (method == "GET" && target.rfind("/api/pair/peers", 0) == 0) {
             type = "application/json; charset=utf-8"; std::ostringstream out; out << '['; bool first = true;
             for (const auto& peer : pairing.peers()) { if (!first) out << ','; first = false; out << "{\"nodeId\":\"" << json_escape(peer.node_id) << "\",\"alias\":\"" << json_escape(peer.alias) << "\",\"host\":\"" << json_escape(peer.host) << "\",\"port\":" << peer.port << ",\"telemetry\":{\"quality\":\"" << json_escape(peer.telemetry.quality) << "\",\"latencyMs\":" << peer.telemetry.target_latency_ms << ",\"packetLossPercent\":" << peer.telemetry.packet_loss_percent << ",\"deviceName\":\"" << json_escape(peer.telemetry.device_name) << "\"},\"endpoints\":["; bool endpoint_first = true; for (const auto& endpoint : peer.endpoints) { if (!endpoint_first) out << ','; endpoint_first = false; out << "{\"id\":\"" << json_escape(endpoint.backend_id) << "\",\"name\":\"" << json_escape(endpoint.name) << "\",\"direction\":\"" << (endpoint.direction == pairing::EndpointDirection::Source ? "source" : "sink") << "\"}"; } out << "]}"; } return out << ']', out.str();
@@ -406,6 +412,13 @@ public:
                 }
             }
             pairing.set_exposed_endpoints(std::move(exposed)); pairing.announce(); return "Pairing profile saved and synchronized.";
+        }
+        if (method == "POST" && target.rfind("/api/discovery", 0) == 0) {
+            const auto query = query_params(target); const auto enabled = query.find("enabled");
+            if (enabled == query.end()) return "Missing discovery state.";
+            if (enabled->second != "true" && enabled->second != "false") return "Invalid discovery state.";
+            if (!pairing.set_discovery_enabled(enabled->second == "true")) return "Could not enable LAN discovery: " + pairing.last_error();
+            return enabled->second == "true" ? "LAN discovery enabled." : "LAN discovery disabled.";
         }
         if (method == "POST" && target.rfind("/api/pair/connect", 0) == 0) {
             const auto query = query_params(target); const auto host = query.find("host"), port = query.find("port"), alias = query.find("alias"), code = query.find("code"); std::uint16_t pairing_port{};

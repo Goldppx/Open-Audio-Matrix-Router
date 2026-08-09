@@ -29,6 +29,13 @@ struct RemotePeer {
     std::vector<ExposedEndpoint> endpoints;
     AudioTelemetry telemetry;
 };
+/** A non-sensitive LAN presence record. It never contains pairing codes. */
+struct DiscoveredPeer {
+    std::string node_id;
+    std::string alias;
+    std::string host;
+    std::uint16_t port{};
+};
 enum class RemoteRouteKind { Send, Receive };
 struct RemoteRouteRequest {
     RemoteRouteKind kind{};
@@ -75,6 +82,12 @@ public:
     void set_remote_route_handler(std::function<bool(const RemoteRouteRequest&, std::string&)> handler);
     bool request_remote_route(const std::string& node_id, const RemoteRouteRequest& request);
     [[nodiscard]] std::vector<RemotePeer> peers() const;
+
+    /** Enables multicast presence advertisements; disabled by default. */
+    bool set_discovery_enabled(bool enabled);
+    [[nodiscard]] bool discovery_enabled() const;
+    /** Entries expire automatically if no advertisement is received for 7 s. */
+    [[nodiscard]] std::vector<DiscoveredPeer> discovered_peers() const;
 
 private:
     class Impl;
