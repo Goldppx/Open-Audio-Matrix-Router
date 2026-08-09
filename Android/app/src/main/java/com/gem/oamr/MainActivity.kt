@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.clickable
@@ -44,6 +45,8 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -60,6 +63,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -278,19 +289,24 @@ private fun HomePage(
             )
         }
         item {
-            MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Mic, t(english, "输入", "Inputs"), inputs.toString(), audioStatus, onStartMic)
-        }
-        item {
-            MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Speaker, t(english, "输出", "Outputs"), outputs.toString(), t(english, "可用端点", "Available endpoints"))
-        }
-        item { MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Devices, t(english, "已连接设备", "Peers"), peers.size.toString(), t(english, "已配对节点", "Paired nodes")) }
-        item { MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Link, t(english, "运行路线", "Routes"), desktop.routes.count { it.enabled }.toString(), t(english, "桌面矩阵", "Desktop matrix")) }
-        item {
-            Card(shape = MaterialTheme.shapes.extraLarge) {
-                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Wifi, null)
-                    Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(t(english, "网络地址", "Network address"), style = MaterialTheme.typography.titleSmall); Text(if (ipVisible) ips else t(english, "已隐藏", "Hidden"), style = MaterialTheme.typography.bodySmall) }
-                    IconButton(onClick = { ipVisible = !ipVisible }) { Icon(if (ipVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, t(english, "显示或隐藏 IP", "Show or hide IP")) }
+            BoxWithConstraints {
+                val narrow = maxWidth < 300.dp
+                if (narrow) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Mic, t(english, "输入", "Inputs"), inputs.toString(), audioStatus, onStartMic)
+                    MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Speaker, t(english, "输出", "Outputs"), outputs.toString(), t(english, "可用端点", "Available endpoints"))
+                    MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Devices, t(english, "已连接设备", "Peers"), peers.size.toString(), t(english, "已配对节点", "Paired nodes"))
+                    MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Link, t(english, "运行路线", "Routes"), desktop.routes.count { it.enabled }.toString(), t(english, "桌面矩阵", "Desktop matrix"))
+                    IpCard(english, ips, ipVisible) { ipVisible = !ipVisible }
+                } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Mic, t(english, "输入", "Inputs"), inputs.toString(), audioStatus, onStartMic)
+                        MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Devices, t(english, "已连接设备", "Peers"), peers.size.toString(), t(english, "已配对节点", "Paired nodes"))
+                        IpCard(english, ips, ipVisible) { ipVisible = !ipVisible }
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Speaker, t(english, "输出", "Outputs"), outputs.toString(), t(english, "可用端点", "Available endpoints"))
+                        MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Link, t(english, "运行路线", "Routes"), desktop.routes.count { it.enabled }.toString(), t(english, "桌面矩阵", "Desktop matrix"))
+                    }
                 }
             }
         }
@@ -336,7 +352,7 @@ private fun SettingsPage(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item { SettingsSection(t(english, "外观", "Appearance"), Icons.Outlined.LightMode) {
-            SettingToggle(Icons.Outlined.Language, t(english, "语言", "Language"), if (english) "English" else "中文", checked = english, onCheckedChange = onEnglish)
+            LanguagePicker(english, onEnglish)
             HorizontalDivider()
             SettingToggle(if (darkMode) Icons.Outlined.DarkMode else Icons.Outlined.LightMode, t(english, "深色模式", "Dark mode"), t(english, "手动切换", "Manual override"), darkMode, onDarkMode)
         } }
@@ -393,7 +409,8 @@ private fun SettingsPage(
 }
 
 @Composable private fun StatusCard(icon: ImageVector, title: String, primary: String, secondary: String, running: Boolean, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = if (running) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant), shape = MaterialTheme.shapes.extraLarge) {
+    val color by animateColorAsState(if (running) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, tween(320), label = "node-card-color")
+    Card(modifier = Modifier.fillMaxWidth().animateContentSize().clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = color), shape = MaterialTheme.shapes.extraLarge) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Text(title, Modifier.padding(start = 10.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold); AssistChip(onClick = {}, label = { Text(if (running) "ONLINE" else "IDLE") }, Modifier.padding(start = 8.dp)) }
             Text(primary, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -403,7 +420,11 @@ private fun SettingsPage(
 }
 
 @Composable private fun MetricCard(modifier: Modifier, icon: ImageVector, title: String, value: String, subtitle: String, onClick: (() -> Unit)? = null) {
-    Card(if (onClick == null) modifier else modifier.clickable(onClick = onClick), shape = MaterialTheme.shapes.extraLarge) { Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Column(Modifier.padding(start = 14.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(title, style = MaterialTheme.typography.titleSmall); Text(subtitle, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }; Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
+    Card((if (onClick == null) modifier else modifier.clickable(onClick = onClick)).animateContentSize(), shape = MaterialTheme.shapes.extraLarge) { Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Column(Modifier.padding(start = 14.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(title, style = MaterialTheme.typography.titleSmall); Text(subtitle, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }; Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
+}
+
+@Composable private fun IpCard(english: Boolean, ips: String, visible: Boolean, onToggle: () -> Unit) {
+    Card(Modifier.fillMaxWidth().animateContentSize(), shape = MaterialTheme.shapes.extraLarge) { Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Wifi, null); Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(t(english, "网络地址", "Network address"), style = MaterialTheme.typography.titleSmall); AnimatedVisibility(visible, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) { Text(ips, style = MaterialTheme.typography.bodySmall) }; if (!visible) Text(t(english, "已隐藏", "Hidden"), style = MaterialTheme.typography.bodySmall) }; IconButton(onClick = onToggle) { Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, t(english, "显示或隐藏 IP", "Show or hide IP")) } } }
 }
 
 @Composable private fun SectionTitle(title: String, icon: ImageVector, onRefresh: (() -> Unit)? = null) {
@@ -418,13 +439,18 @@ private fun SettingsPage(
 
 @Composable private fun SettingsSection(title: String, icon: ImageVector, content: @Composable () -> Unit) {
     var expanded by rememberSaveable(title) { mutableStateOf(title == "配对" || title == "Pairing") }
-    Card(shape = MaterialTheme.shapes.extraLarge) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Card(Modifier.animateContentSize(tween(260)), shape = MaterialTheme.shapes.extraLarge) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Text(title, Modifier.padding(start = 10.dp).weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold); Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null) }
-        if (expanded) content()
+        AnimatedVisibility(expanded, enter = expandVertically(tween(260)) + fadeIn(tween(180)), exit = shrinkVertically(tween(220)) + fadeOut(tween(130))) { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
     } }
 }
 
 @Composable private fun SettingToggle(icon: ImageVector, title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(title, style = MaterialTheme.typography.titleSmall); Text(subtitle, style = MaterialTheme.typography.bodySmall) }; Switch(checked, onCheckedChange) } }
+
+@Composable private fun LanguagePicker(english: Boolean, onSelect: (Boolean) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().clickable { expanded = true }, verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Language, null); Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(t(english, "语言", "Language"), style = MaterialTheme.typography.titleSmall); Text(if (english) "English" else "中文", style = MaterialTheme.typography.bodySmall) }; Icon(Icons.Outlined.ExpandMore, null); DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { DropdownMenuItem(text = { Text("中文") }, onClick = { expanded = false; onSelect(false) }); DropdownMenuItem(text = { Text("English") }, onClick = { expanded = false; onSelect(true) }) } }
+}
 
 @Composable private fun ChoiceButton(label: String, selected: Boolean, onClick: () -> Unit) { OutlinedButton(onClick, Modifier.fillMaxWidth()) { Text(if (selected) "✓  $label" else label, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
 
