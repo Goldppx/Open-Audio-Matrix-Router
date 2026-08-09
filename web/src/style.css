@@ -50,12 +50,13 @@ button, input, select { font: inherit; }
 .app-header h1 { margin: 0; font-size: clamp(1.7rem, 3vw, 2.35rem); letter-spacing: -.03em; }
 .app-header p { margin: 8px 0 0; color: var(--md-sys-color-on-surface-variant); }
 .status-chip { white-space: nowrap; }
-.header-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
-.header-controls md-outlined-select { width: 116px; }
+.header-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; }
+.header-controls md-icon-button { color: var(--md-sys-color-on-surface-variant); }
+.header-controls md-icon-button span { display: block; font-size: 1.05rem; font-weight: 650; line-height: 1; }
 .ui-notice { max-width: 360px; overflow: hidden; color: var(--md-sys-color-on-surface-variant); font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .wide { grid-column: 1 / -1; }
-.card { display: block; padding: 22px; background: var(--md-sys-color-surface-container); border-radius: 24px; }
+.card { display: block; min-width: 0; padding: 22px; background: var(--md-sys-color-surface-container); border-radius: 24px; }
 .card h2 { margin: 0 0 7px; font-size: 1.25rem; }
 .muted { color: var(--md-sys-color-on-surface-variant); line-height: 1.55; margin: 0 0 16px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: center; }
@@ -92,11 +93,27 @@ md-divider { margin: 18px 0; }
 .dialog-form { display: grid; gap: 13px; padding: 4px; min-width: min(400px, 80vw); }
 
 @media (max-width: 760px) {
-  .app-shell { padding: 15px; }
-  .app-header, .grid, .form-grid, .exposure-list { grid-template-columns: 1fr; display: grid; }
-  .app-header { gap: 10px; }
-  .header-controls { justify-content: flex-start; }
+  .app-shell { padding: 14px; }
+  .app-header { display: grid; grid-template-columns: 1fr; gap: 12px; padding-bottom: 20px; }
+  .grid, .form-grid, .exposure-list { grid-template-columns: 1fr; }
+  .grid { gap: 14px; }
+  .header-controls { width: 100%; justify-content: flex-start; }
   .ui-notice { flex-basis: 100%; max-width: none; }
   .wide { grid-column: auto; }
   .card { padding: 17px; border-radius: 18px; }
+  .actions { display: grid; grid-template-columns: 1fr; }
+  .actions > * { width: 100%; }
+  .route-actions { justify-content: flex-start; }
+  .peer-title { align-items: flex-start; flex-wrap: wrap; }
+  .dialog-form { min-width: 0; width: min(100%, 360px); }
+}
+
+@media (max-width: 420px) {
+  .app-shell { padding: 10px; }
+  .app-header h1 { font-size: 1.55rem; }
+  .card { padding: 14px; border-radius: 16px; }
+  .data-table { min-width: 640px; }
+  .matrix-table { min-width: 720px; }
+  .matrix-table th:first-child { min-width: 210px; }
+  .log { height: 180px; font-size: .78rem; }
 }

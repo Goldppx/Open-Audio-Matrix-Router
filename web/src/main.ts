@@ -5,6 +5,9 @@ import '@material/web/checkbox/checkbox.js';
 import '@material/web/chips/assist-chip.js';
 import '@material/web/dialog/dialog.js';
 import '@material/web/divider/divider.js';
+import '@material/web/iconbutton/icon-button.js';
+import '@material/web/menu/menu.js';
+import '@material/web/menu/menu-item.js';
 import '@material/web/select/outlined-select.js';
 import '@material/web/select/select-option.js';
 import '@material/web/textfield/outlined-text-field.js';
@@ -123,13 +126,21 @@ function renderDeviceControls(): void {
 function enhancePanels(): void {
   const header = document.querySelector<HTMLElement>('.app-header');
   if (header && !document.querySelector('#uiLanguage')) {
-    const themeLabel = language === 'en' ? (theme === 'dark' ? 'Light' : 'Dark') : (theme === 'dark' ? '浅色' : '深色');
-    const refreshLabel = language === 'en' ? 'Refresh' : '刷新';
+    const themeLabel = language === 'en' ? (theme === 'dark' ? 'Use light theme' : 'Use dark theme') : (theme === 'dark' ? '切换浅色模式' : '切换深色模式');
+    const refreshLabel = language === 'en' ? 'Refresh page' : '刷新页面';
+    const languageLabel = language === 'en' ? 'Choose language' : '选择语言';
     const controls = document.createElement('div');
     controls.className = 'header-controls';
-    controls.innerHTML = `<span id="uiNotice" class="ui-notice"></span><md-outlined-select id="uiLanguage" aria-label="Language"><md-select-option value="zh-CN" ${language === 'zh-CN' ? 'selected' : ''}><div slot="headline">中文</div></md-select-option><md-select-option value="en" ${language === 'en' ? 'selected' : ''}><div slot="headline">English</div></md-select-option></md-outlined-select><md-text-button id="themeToggle">${themeLabel}</md-text-button><md-text-button id="refreshPage">${refreshLabel}</md-text-button>`;
+    controls.innerHTML = `<span id="uiNotice" class="ui-notice"></span><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><span aria-hidden="true">文</span></md-icon-button><md-menu id="languageMenu" anchor="uiLanguage"><md-menu-item data-language="zh-CN"><div slot="headline">中文</div></md-menu-item><md-menu-item data-language="en"><div slot="headline">English</div></md-menu-item></md-menu><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><span aria-hidden="true">◐</span></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><span aria-hidden="true">↻</span></md-icon-button>`;
     header.append(controls);
-    byId<HTMLElement>('uiLanguage').addEventListener('change', () => { localStorage.setItem('oamr-language', value('uiLanguage')); window.location.reload(); });
+    byId<HTMLElement>('uiLanguage').addEventListener('click', () => {
+      const menu = byId<HTMLElement & { show: () => void }>('languageMenu');
+      menu.show();
+    });
+    document.querySelectorAll<HTMLElement>('[data-language]').forEach(item => item.addEventListener('click', () => {
+      localStorage.setItem('oamr-language', item.dataset.language ?? 'zh-CN');
+      window.location.reload();
+    }));
     byId<HTMLElement>('themeToggle').addEventListener('click', () => { localStorage.setItem('oamr-theme', theme === 'dark' ? 'light' : 'dark'); window.location.reload(); });
     byId<HTMLElement>('refreshPage').addEventListener('click', () => window.location.reload());
   }
