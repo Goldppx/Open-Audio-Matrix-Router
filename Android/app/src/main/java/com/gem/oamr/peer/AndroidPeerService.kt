@@ -17,7 +17,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 data class AndroidEndpoint(val id: String, val name: String, val direction: Char)
-data class AndroidPeer(val nodeId: String, val alias: String, val host: String, val port: Int)
+data class AndroidPeer(val nodeId: String, val alias: String, val host: String, val port: Int, val endpoints: List<AndroidEndpoint> = emptyList())
 
 /**
  * Android implementation of OAMR's TCP 8791 pairing control protocol.
@@ -45,8 +45,11 @@ class AndroidPeerService private constructor(private val context: Context) {
         preferences.getStringSet("peers", emptySet()).orEmpty().forEach { row ->
             runCatching {
                 val fields = row.split('|')
-                require(fields.size == 4)
-                AndroidPeer(decodeStored(fields[0]), decodeStored(fields[1]), decodeStored(fields[2]), fields[3].toInt()).also { peers[it.nodeId] = it }
+                require(fields.size in 4..5)
+                AndroidPeer(
+                    decodeStored(fields[0]), decodeStored(fields[1]), decodeStored(fields[2]), fields[3].toInt(),
+                    if (fields.size == 5) parseCatalog(decodeStored(fields[4])) else emptyList(),
+                ).also { peers[it.nodeId] = it }
             }
         }
     }
@@ -88,6 +91,20 @@ class AndroidPeerService private constructor(private val context: Context) {
 
     fun knownPeers(): List<AndroidPeer> = synchronized(peers) { peers.values.toList() }
 
+    fun createPairedMatrix(peerId: String, direction: String, remoteEndpoint: AndroidEndpoint): String {
+        val peer = synchronized(peers) { peers[peerId] } ?: return "Paired device not found"
+        val port = 52000 + (System.currentTimeMillis() % 1000).toInt()
+        val remoteKind = if (direction == "send") "receive" else if (direction == "receive") "send" else return "Invalid matrix direction"
+        val target = "/route?node=${encode(nodeId)}&kind=$remoteKind&device=${encode(remoteEndpoint.id)}&port=$port&quality=medium&latency=100&mode=auto&loopback=false"
+        return try {
+            val reply = request(peer.host, peer.port, target)
+            if (reply != "ok") return "Remote node rejected route: $reply"
+            val local = routeHandler ?: return "Audio engine is not ready"
+            if (direction == "send") local("send", "android-oboe-input", peer.host, port)
+            else local("receive", "android-oboe-output", peer.host, port)
+        } catch (error: Exception) { "Matrix failed: ${error.message}" }
+    }
+
     fun pairDesktop(host: String, code: String): String {
         val path = "/pair?code=${encode(code)}&node=${encode(nodeId)}&alias=${encode(alias)}&port=8791"
         return try {
@@ -95,7 +112,7 @@ class AndroidPeerService private constructor(private val context: Context) {
             val fields = query("?$reply")
             if (fields.containsKey("error")) return "Pairing failed: ${fields["error"]}"
             val remoteNode = fields["node"] ?: return "Pairing failed: invalid desktop reply"
-            synchronized(peers) { peers[remoteNode] = AndroidPeer(remoteNode, fields["alias"].orEmpty().ifBlank { host }, host, 8791); savePeers() }
+            synchronized(peers) { peers[remoteNode] = AndroidPeer(remoteNode, fields["alias"].orEmpty().ifBlank { host }, host, 8791, parseCatalog(fields["catalog"].orEmpty())); savePeers() }
             "Paired with ${fields["alias"].orEmpty().ifBlank { host }}"
         } catch (error: Exception) { "Pairing failed: ${error.message}" }
     }
@@ -149,9 +166,17 @@ class AndroidPeerService private constructor(private val context: Context) {
 
     private fun catalog(): String = endpoints().joinToString(";") { "${it.direction},${encode(it.name)},${encode(it.id)}" }
 
+    private fun parseCatalog(value: String): List<AndroidEndpoint> = value.split(';').mapNotNull { row ->
+        val fields = row.split(',', limit = 3)
+        if (fields.size != 3 || fields[0].firstOrNull() !in setOf('S', 'K')) null
+        else AndroidEndpoint(decodeUrl(fields[2]), decodeUrl(fields[1]), fields[0][0])
+    }
+
+    private fun serializeCatalog(value: List<AndroidEndpoint>): String = value.joinToString(";") { "${it.direction},${encode(it.name)},${encode(it.id)}" }
+
     private fun savePeers() {
         preferences.edit().putStringSet("peers", peers.values.map { peer ->
-            listOf(encodeStored(peer.nodeId), encodeStored(peer.alias), encodeStored(peer.host), peer.port.toString()).joinToString("|")
+            listOf(encodeStored(peer.nodeId), encodeStored(peer.alias), encodeStored(peer.host), peer.port.toString(), encodeStored(serializeCatalog(peer.endpoints))).joinToString("|")
         }.toSet()).apply()
     }
 
@@ -171,6 +196,7 @@ class AndroidPeerService private constructor(private val context: Context) {
         private fun query(value: String): Map<String, String> = value.substringAfter('?', "").split('&').mapNotNull { row ->
             if (row.isBlank()) null else row.substringBefore('=') to URLDecoder.decode(row.substringAfter('=', ""), StandardCharsets.UTF_8)
         }.toMap()
+        private fun decodeUrl(value: String): String = URLDecoder.decode(value, StandardCharsets.UTF_8)
         private fun encodeStored(value: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(StandardCharsets.UTF_8))
         private fun decodeStored(value: String): String = String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8)
     }

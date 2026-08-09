@@ -43,6 +43,8 @@ import com.gem.oamr.control.DesktopSnapshot
 import com.gem.oamr.control.PairedEndpoint
 import com.gem.oamr.control.PairedPeer
 import com.gem.oamr.peer.AndroidPeerService
+import com.gem.oamr.peer.AndroidEndpoint
+import com.gem.oamr.peer.AndroidPeer
 import com.gem.oamr.ui.theme.OAMRTheme
 
 class MainActivity : ComponentActivity() {
@@ -72,6 +74,10 @@ fun OAMRApp(activity: ComponentActivity) {
     var androidPairHost by remember { mutableStateOf("") }
     var androidPairCode by remember { mutableStateOf("") }
     var androidCode by remember { mutableStateOf(androidNode.currentPairCode()) }
+    var androidPeers by remember { mutableStateOf(androidNode.knownPeers()) }
+    var selectedAndroidPeer by remember { mutableStateOf<AndroidPeer?>(null) }
+    var androidMatrixDirection by remember { mutableStateOf("send") }
+    var selectedAndroidRemoteEndpoint by remember { mutableStateOf<AndroidEndpoint?>(null) }
     var localAlias by remember { mutableStateOf("") }
     var peerHost by remember { mutableStateOf("") }
     var peerCode by remember { mutableStateOf("") }
@@ -143,9 +149,44 @@ fun OAMRApp(activity: ComponentActivity) {
                         Button(onClick = {
                             Thread {
                                 val message = androidNode.pairDesktop(androidPairHost, androidPairCode)
-                                activity.runOnUiThread { androidNodeStatus = message }
+                                activity.runOnUiThread { androidNodeStatus = message; androidPeers = androidNode.knownPeers() }
                             }.start()
                         }, enabled = androidPairHost.isNotBlank() && androidPairCode.isNotBlank()) { Text("让 Android 与桌面配对") }
+                    }
+                }
+            }
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Android 本机配对矩阵", style = MaterialTheme.typography.titleMedium)
+                        Text("手机自己发起：麦克风 → 桌面输出，或桌面来源 → 手机扬声器。")
+                        OutlinedButton(onClick = { androidPeers = androidNode.knownPeers() }) { Text("刷新已配对节点") }
+                        androidPeers.forEach { peer ->
+                            OutlinedButton(onClick = { selectedAndroidPeer = peer; selectedAndroidRemoteEndpoint = null }, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (selectedAndroidPeer?.nodeId == peer.nodeId) "✓ ${peer.alias}" else peer.alias)
+                            }
+                        }
+                        selectedAndroidPeer?.let { peer ->
+                            OutlinedButton(onClick = { androidMatrixDirection = "send"; selectedAndroidRemoteEndpoint = null }) {
+                                Text(if (androidMatrixDirection == "send") "✓ 手机麦克风 → ${peer.alias}" else "手机麦克风 → ${peer.alias}")
+                            }
+                            OutlinedButton(onClick = { androidMatrixDirection = "receive"; selectedAndroidRemoteEndpoint = null }) {
+                                Text(if (androidMatrixDirection == "receive") "✓ ${peer.alias} → 手机扬声器" else "${peer.alias} → 手机扬声器")
+                            }
+                            val requiredDirection = if (androidMatrixDirection == "send") 'K' else 'S'
+                            peer.endpoints.filter { it.direction == requiredDirection }.forEach { endpoint ->
+                                OutlinedButton(onClick = { selectedAndroidRemoteEndpoint = endpoint }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(if (selectedAndroidRemoteEndpoint?.id == endpoint.id) "✓ ${endpoint.name}" else endpoint.name)
+                                }
+                            }
+                            if (peer.endpoints.isEmpty()) Text("此设备的端点目录尚未同步；请在手机端重新配对此设备。", style = MaterialTheme.typography.bodySmall)
+                            Button(onClick = {
+                                Thread {
+                                    val message = androidNode.createPairedMatrix(peer.nodeId, androidMatrixDirection, selectedAndroidRemoteEndpoint!!)
+                                    activity.runOnUiThread { androidNodeStatus = message }
+                                }.start()
+                            }, enabled = selectedAndroidRemoteEndpoint != null) { Text("创建 Android 配对矩阵") }
+                        }
                     }
                 }
             }
