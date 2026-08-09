@@ -30,6 +30,8 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 let devices: Devices = { sources: [], sinks: [] };
 let peers: Peer[] = [];
 let matrixDirty = false;
+let peerTopologyFingerprint = '';
+let routeFingerprint = '';
 let deleteConfirmation: number | undefined;
 let selectedRoute: Route | undefined;
 let localAlias = 'This computer';
@@ -306,13 +308,36 @@ function openRouteDialog(route: Route): void {
 
 function renderPeers(): void {
   byId<HTMLElement>('peerList').innerHTML = peers.length ? peers.map(peer => {
-    const loss = peer.telemetry.packetLossPercent < 0 ? '—' : `${peer.telemetry.packetLossPercent.toFixed(2)}%`;
-    const telemetry = peer.telemetry.deviceName ? `音质 ${escapeHtml(peer.telemetry.quality)} · 目标延迟 ${peer.telemetry.latencyMs} ms · 丢包 ${loss} · 设备 ${escapeHtml(peer.telemetry.deviceName)}` : '当前没有传输音频';
+    const telemetry = peerTelemetryText(peer);
     const endpoints = peer.endpoints.length ? peer.endpoints.map(endpoint => `<md-assist-chip class="endpoint-chip" label="${endpoint.direction === 'source' ? '来源' : '输出'} · ${escapeHtml(endpoint.name)}"></md-assist-chip>`).join('') : '<span class="muted">对方未开放设备</span>';
-    return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><md-text-button data-edit-peer="${escapeHtml(peer.nodeId)}">更新地址</md-text-button></div><div class="muted">${escapeHtml(peer.host)}:8791</div><div class="muted">${telemetry}</div><div>${endpoints}</div></article>`;
+    return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><md-text-button data-edit-peer="${escapeHtml(peer.nodeId)}">更新地址</md-text-button></div><div class="muted">${escapeHtml(peer.host)}:8791</div><div class="muted peer-telemetry" data-telemetry-node="${escapeHtml(peer.nodeId)}">${telemetry}</div><div>${endpoints}</div></article>`;
   }).join('') : '<div class="empty">尚未配对设备。</div>';
   document.querySelectorAll<HTMLElement>('[data-edit-peer]').forEach(button => button.addEventListener('click', () => openPeerDialog(button.dataset.editPeer!)));
   applyPreferences();
+}
+
+function peerTelemetryText(peer: Peer): string {
+  const loss = peer.telemetry.packetLossPercent < 0 ? '—' : `${peer.telemetry.packetLossPercent.toFixed(2)}%`;
+  return peer.telemetry.deviceName
+    ? `音质 ${peer.telemetry.quality} · 目标延迟 ${peer.telemetry.latencyMs} ms · 丢包 ${loss} · 设备 ${peer.telemetry.deviceName}`
+    : '当前没有传输音频';
+}
+
+function updatePeerTelemetry(): void {
+  const telemetryByNode = new Map(peers.map(peer => [peer.nodeId, peerTelemetryText(peer)]));
+  document.querySelectorAll<HTMLElement>('[data-telemetry-node]').forEach(element => {
+    const next = telemetryByNode.get(element.dataset.telemetryNode ?? '');
+    if (next !== undefined && element.textContent !== next) element.textContent = next;
+  });
+}
+
+function peerTopologyOf(items: Peer[]): string {
+  return JSON.stringify(items.map(peer => ({
+    nodeId: peer.nodeId,
+    alias: peer.alias,
+    host: peer.host,
+    endpoints: peer.endpoints.map(endpoint => [endpoint.id, endpoint.name, endpoint.direction])
+  })));
 }
 
 function openPeerDialog(nodeId: string): void {
@@ -328,13 +353,26 @@ function openPeerDialog(nodeId: string): void {
 }
 
 async function refreshPeers(): Promise<void> {
-  peers = JSON.parse(await request('/api/pair/peers')) as Peer[];
-  renderPeers();
-  if (!matrixDirty) renderMatrix();
+  const nextPeers = JSON.parse(await request('/api/pair/peers')) as Peer[];
+  const nextTopology = peerTopologyOf(nextPeers);
+  const topologyChanged = nextTopology !== peerTopologyFingerprint;
+  peers = nextPeers;
+  if (topologyChanged) {
+    peerTopologyFingerprint = nextTopology;
+    renderPeers();
+    if (!matrixDirty) renderMatrix();
+  } else {
+    updatePeerTelemetry();
+  }
 }
 
 async function refreshRoutes(): Promise<void> {
-  renderRoutes(JSON.parse(await request('/api/routes')) as Route[]);
+  const nextRoutes = JSON.parse(await request('/api/routes')) as Route[];
+  const nextFingerprint = JSON.stringify(nextRoutes);
+  if (nextFingerprint === routeFingerprint) return;
+  routeFingerprint = nextFingerprint;
+  deleteConfirmation = undefined;
+  renderRoutes(nextRoutes);
 }
 
 async function applyMatrix(): Promise<void> {
