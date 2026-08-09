@@ -145,11 +145,11 @@ function renderShell(): void {
         <section class="card"><h2>发送到局域网</h2><div class="stack"><md-outlined-select id="networkSource" label="音频来源"></md-outlined-select><div class="form-grid"><md-outlined-text-field id="sendHost" label="IP / 主机名" value="127.0.0.1"></md-outlined-text-field><md-outlined-text-field id="sendPort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field></div></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="createSender"', uiLabel('创建发送路线', 'Create sender route'), icons.send)}</div></div></section>
         <section class="card"><h2>从局域网接收</h2><div class="stack"><md-outlined-select id="receiveSink" label="播放到"></md-outlined-select><md-outlined-text-field id="receivePort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="createReceiver"', uiLabel('创建接收路线', 'Create receiver route'), icons.receive)}</div></div></section>
 
-        <section class="card wide"><h2>音频矩阵</h2><div id="matrix" class="data-table-wrap"><div class="empty">正在加载设备…</div></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="applyMatrix"', uiLabel('添加已勾选的路线', 'Add selected routes'), icons.addLink)}</div></div></section>
+        <section class="card wide"><h2>音频矩阵</h2><div id="matrix" class="matrix-host"><div class="data-table-wrap matrix-placeholder empty">正在加载设备…</div></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="applyMatrix"', uiLabel('添加已勾选的路线', 'Add selected routes'), icons.addLink)}</div></div></section>
 
         <section class="card wide"><h2>设备配对</h2><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="pairing-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly><md-icon-button id="newCode" class="code-action" slot="trailing-icon" title="${language === 'en' ? 'Generate code' : '生成新代码'}" aria-label="${language === 'en' ? 'Generate code' : '生成新代码'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button></md-outlined-text-field></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field></div></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="pairRemote"', uiLabel('开始配对', 'Pair device'), icons.pair)}</div></div></section>
 
-        <section class="card wide"><h2>已配对设备与传输遥测</h2><div id="peerList" class="empty">尚未配对设备。</div></section>
+        <section class="card wide"><h2>已配对设备与传输遥测</h2><div id="peerList" class="peer-list-host"><div class="peer-list-placeholder empty">尚未配对设备。</div></div></section>
         <section class="card wide"><h2>运行日志</h2><pre id="status" class="log">No log entries.</pre></section>
       </div>
     </main>
@@ -343,7 +343,7 @@ function renderMatrix(): void {
     }).join('');
     return `<tr><th>${escapeHtml(source.name)}${'remote' in source ? ' <small>网络</small>' : ''}</th>${cells}</tr>`;
   }).join('');
-  byId<HTMLElement>('matrix').innerHTML = `<table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${'remote' in sink ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+  byId<HTMLElement>('matrix').innerHTML = `<div class="data-table-wrap"><table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${'remote' in sink ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   document.querySelectorAll<HTMLElement>('#matrix md-checkbox').forEach(item => item.addEventListener('change', () => { matrixDirty = true; }));
   applyPreferences();
 }
@@ -397,7 +397,7 @@ function renderPeers(): void {
     const edit = iconButton(`data-edit-peer="${escapeHtml(peer.nodeId)}"`, uiLabel('编辑名称和地址', 'Edit name and address'), icons.edit);
     const removal = iconButton(`data-delete-peer="${escapeHtml(peer.nodeId)}"`, peerDeleteConfirmation === peer.nodeId ? uiLabel('确认删除已配对设备', 'Confirm paired device deletion') : uiLabel('删除已配对设备', 'Delete paired device'), icons.delete, peerDeleteConfirmation === peer.nodeId ? 'danger-action' : '');
     return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><span class="peer-actions">${edit}${removal}</span></div><div class="muted">${escapeHtml(peer.host)}:8791</div><div class="muted peer-telemetry" data-telemetry-node="${escapeHtml(peer.nodeId)}">${telemetry}</div><div>${endpoints}</div></article>`;
-  }).join('') : '<div class="empty">尚未配对设备。</div>';
+  }).join('') : '<div class="peer-list-placeholder empty">尚未配对设备。</div>';
   document.querySelectorAll<HTMLElement>('[data-edit-peer]').forEach(button => button.addEventListener('click', () => openPeerDialog(button.dataset.editPeer!)));
   document.querySelectorAll<HTMLElement>('[data-delete-peer]').forEach(button => button.addEventListener('click', () => void (async () => {
     const nodeId = button.dataset.deletePeer!;
