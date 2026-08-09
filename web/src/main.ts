@@ -36,11 +36,6 @@ type LogLevel = 'VERBOSE' | 'INFO' | 'WARNING' | 'ERROR';
 const logs: Array<{ level: LogLevel; message: string; time: string }> = [];
 const language = localStorage.getItem('oamr-language') === 'en' ? 'en' : 'zh-CN';
 const theme = localStorage.getItem('oamr-theme') === 'dark' ? 'dark' : 'light';
-const statusTranslations: Record<string, string> = {
-  '请至少选择一条矩阵路线。': 'Select at least one matrix route.', '请选择音频来源。': 'Select an audio source.',
-  '已生成一次性配对代码；十分钟内有效。': 'One-time pairing code generated. It expires in ten minutes.',
-  '再次点击“确认删除”才会移除此路线。': 'Click Confirm delete again to remove this route.'
-};
 
 const escapeHtml = (value: unknown) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]!);
 const byId = <T extends HTMLElement>(id: string) => document.querySelector<T>(`#${id}`)!;
@@ -53,8 +48,7 @@ function logEvent(message: string, level: LogLevel = 'INFO'): void {
 }
 
 function setStatus(message: string, _level: LogLevel = 'INFO'): void {
-  const notice = document.querySelector<HTMLElement>('#uiNotice');
-  if (notice) notice.textContent = language === 'en' ? (statusTranslations[message] ?? message) : message;
+  void message;
 }
 
 function renderLogs(): void {
@@ -133,14 +127,26 @@ function enhancePanels(): void {
     const languageLabel = language === 'en' ? 'Choose language' : '选择语言';
     const controls = document.createElement('div');
     controls.className = 'header-controls';
-    controls.innerHTML = `<span id="uiNotice" class="ui-notice"></span><div class="language-control"><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.87 15.07 10.33 12.56l.03-.03A17.3 17.3 0 0 0 14.07 6h2.86V4h-7V2h-2v2H1v2h11.17a15.4 15.4 0 0 1-2.82 5.35A15.1 15.1 0 0 1 7.35 8.6h-2a17 17 0 0 0 2.73 4.17l-5.07 5.02L4.41 19.2l5-5 3.11 3.11.35-2.24ZM18.5 10h-2l-4.5 12h2l1.12-3h4.75L21 22h2l-4.5-12Zm-2.63 7 1.63-4.33L19.13 17h-3.26Z"/></svg></md-icon-button><div id="languageMenu" class="language-menu" role="menu" hidden><md-text-button data-language="zh-CN">中文</md-text-button><md-text-button data-language="en">English</md-text-button></div></div><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.91-.1-1.35A7 7 0 0 1 12 3Z"/></svg></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button>`;
+    controls.innerHTML = `<div class="language-control"><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.87 15.07 10.33 12.56l.03-.03A17.3 17.3 0 0 0 14.07 6h2.86V4h-7V2h-2v2H1v2h11.17a15.4 15.4 0 0 1-2.82 5.35A15.1 15.1 0 0 1 7.35 8.6h-2a17 17 0 0 0 2.73 4.17l-5.07 5.02L4.41 19.2l5-5 3.11 3.11.35-2.24ZM18.5 10h-2l-4.5 12h2l1.12-3h4.75L21 22h2l-4.5-12Zm-2.63 7 1.63-4.33L19.13 17h-3.26Z"/></svg></md-icon-button><div id="languageMenu" class="language-menu" role="menu" hidden><md-text-button data-language="zh-CN">中文</md-text-button><md-text-button data-language="en">English</md-text-button></div></div><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.91-.1-1.35A7 7 0 0 1 12 3Z"/></svg></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button>`;
     header.append(controls);
-    byId<HTMLElement>('uiLanguage').addEventListener('click', () => { const menu = byId<HTMLElement>('languageMenu'); menu.hidden = !menu.hidden; });
+    const languageMenu = byId<HTMLElement>('languageMenu');
+    const closeLanguageMenu = () => {
+      if (languageMenu.hidden || !languageMenu.classList.contains('open')) return;
+      languageMenu.classList.remove('open');
+      languageMenu.addEventListener('transitionend', () => { if (!languageMenu.classList.contains('open')) languageMenu.hidden = true; }, { once: true });
+    };
+    byId<HTMLElement>('uiLanguage').addEventListener('click', () => {
+      if (languageMenu.classList.contains('open')) { closeLanguageMenu(); return; }
+      const button = byId<HTMLElement>('uiLanguage').getBoundingClientRect();
+      languageMenu.classList.toggle('align-right', window.innerWidth - button.left < 132);
+      languageMenu.hidden = false;
+      window.requestAnimationFrame(() => languageMenu.classList.add('open'));
+    });
     document.querySelectorAll<HTMLElement>('[data-language]').forEach(item => item.addEventListener('click', () => {
       localStorage.setItem('oamr-language', item.dataset.language ?? 'zh-CN');
       window.location.reload();
     }));
-    document.addEventListener('click', event => { if (!byId<HTMLElement>('uiLanguage').contains(event.target as Node) && !byId<HTMLElement>('languageMenu').contains(event.target as Node)) byId<HTMLElement>('languageMenu').hidden = true; });
+    document.addEventListener('click', event => { if (!byId<HTMLElement>('uiLanguage').contains(event.target as Node) && !languageMenu.contains(event.target as Node)) closeLanguageMenu(); });
     byId<HTMLElement>('themeToggle').addEventListener('click', () => { localStorage.setItem('oamr-theme', theme === 'dark' ? 'light' : 'dark'); window.location.reload(); });
     byId<HTMLElement>('refreshPage').addEventListener('click', () => window.location.reload());
   }
