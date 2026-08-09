@@ -71,7 +71,7 @@ md-divider { margin: 18px 0; }
 .route-table-placeholder { display: flex; align-items: center; min-block-size: 64px; }
 .matrix-host { min-block-size: 260px; }
 .matrix-host > .data-table-wrap { min-block-size: 260px; }
-.matrix-placeholder { display: flex; align-items: center; min-block-size: 260px; }
+.matrix-placeholder { display: flex; align-items: center; min-block-size: 260px; padding-inline: 16px; }
 .peer-list-host { min-block-size: 64px; }
 .peer-list-placeholder { display: flex; align-items: center; min-block-size: 64px; }
 .peer-card { padding: 13px 0; border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline) 45%, transparent); }
