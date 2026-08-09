@@ -79,6 +79,8 @@ struct FanoutSettings {
 struct MatrixRoute {
     std::size_t source_index{};
     std::size_t sink_index{};
+    /** Linear gain, where 1.0 is unity (100%) and 0.0 is muted. */
+    double gain{1.0};
 };
 
 struct MatrixSettings {
@@ -111,6 +113,8 @@ struct ReceiverSettings {
 struct NetworkMixerInput {
     std::uint16_t port{};
     NetworkProfile network{};
+    /** Linear gain, where 1.0 is unity (100%) and 0.0 is muted. */
+    double gain{1.0};
 };
 
 /** Mixes several RTP/Opus receive legs into one local playback endpoint. */

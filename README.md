@@ -11,6 +11,8 @@ kept as a build target through the GStreamer backend abstraction.
 - Local microphone/render-loopback to one or more playback routes.
 - Mixer routes: multiple local sources, or multiple paired RTP sources, into
   one playback endpoint.
+- Live per-source mixer level controls (0–200%) from the Route table, without
+  restarting the audio route.
 - RTP/UDP + Opus audio send and receive with 48 kHz PCM conversion.
 - Multiple independently startable routes, with pause, resume and deletion.
 - Per-network-route quality, latency target and mode adjustment.

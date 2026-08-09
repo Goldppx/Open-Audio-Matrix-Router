@@ -37,6 +37,8 @@ int main() {
     auto local_route = backend->create_matrix(local_mixer);
     assert(local_route);
     assert(local_route->poll());
+    assert(local_route->set_mixer_input_gain(0, 0.35));
+    assert(!local_route->set_mixer_input_gain(2, 1.0));
     local_route->stop();
 
     // A shared RTP mixer owns one sink, while each UDP input keeps its own
@@ -48,6 +50,7 @@ int main() {
     auto network_route = backend->create_network_mixer(network_mixer);
     assert(network_route);
     assert(network_route->poll());
+    assert(network_route->set_mixer_input_gain(1, 1.25));
     network_route->stop();
     std::cout << "GStreamer RTP/Opus sender smoke tests passed.\n";
 }

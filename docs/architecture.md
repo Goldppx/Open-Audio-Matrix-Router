@@ -26,6 +26,11 @@ running route is one transient pipeline owned by an `AudioRoute`:
 - network mixer: several RTP/Opus receive legs, each with an independent
   jitter buffer, converge in one `audiomixer` before opening one local sink
 
+Every matrix/mixer input is preceded by a named GStreamer `volume` element.
+`AudioRoute::set_mixer_input_gain()` updates that element in place, allowing
+the Web route editor to apply a 0–200% input level immediately rather than
+recreating the pipeline.
+
 Pipelines are configured as 48 kHz, stereo, signed 16-bit PCM at the backend
 boundary; GStreamer carries out required format conversion. Route properties
 are changed by stopping and recreating the route; that stop/start contract is

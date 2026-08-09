@@ -33,6 +33,11 @@ public:
 
     [[nodiscard]] virtual bool is_running() const noexcept = 0;
     [[nodiscard]] virtual const std::string& last_error() const noexcept = 0;
+    /** Updates one mixer input gain without recreating the running route.
+     * The input index follows MatrixSettings::routes or NetworkMixerSettings::inputs.
+     * Returns false when this route has no mixer, the index is invalid, or the
+     * backend rejected the requested linear gain. */
+    virtual bool set_mixer_input_gain(std::size_t input_index, double gain) { (void)input_index; (void)gain; return false; }
     [[nodiscard]] virtual std::optional<TransportTelemetry> transport_telemetry() const noexcept { return std::nullopt; }
 };
 

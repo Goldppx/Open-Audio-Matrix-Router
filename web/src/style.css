@@ -147,6 +147,12 @@ md-divider { margin: var(--oamr-space-4) 0; }
 .danger-action { --md-text-button-label-text-color: var(--md-sys-color-error); --md-text-button-hover-label-text-color: var(--md-sys-color-error); --md-icon-button-icon-color: var(--md-sys-color-error); --md-icon-button-hover-icon-color: var(--md-sys-color-error); }
 .empty { color: var(--md-sys-color-on-surface-variant); padding: var(--oamr-space-4) 0; }
 .dialog-form { display: grid; gap: var(--oamr-space-3); padding: var(--oamr-space-1) var(--oamr-space-5) var(--oamr-space-3); min-width: min(400px, calc(100vw - 72px)); }
+.mixer-gains { display: grid; gap: var(--oamr-space-2); padding: var(--oamr-space-3); border-radius: var(--oamr-radius-md); background: var(--md-sys-color-surface-container-low); }
+.mixer-gains > span { color: var(--md-sys-color-on-surface-variant); font-size: .85rem; }
+.mixer-gain-control { display: grid; grid-template-columns: minmax(0, 1fr) 1.4fr auto; align-items: center; gap: var(--oamr-space-2); min-block-size: var(--oamr-touch-target); }
+.mixer-gain-control > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mixer-gain-control md-slider { inline-size: 100%; }
+.mixer-gain-control output { min-inline-size: 3.25rem; color: var(--md-sys-color-on-surface-variant); font-variant-numeric: tabular-nums; text-align: end; }
 .tutorial-content { display: grid; gap: var(--oamr-space-3); max-width: 620px; }
 .tutorial-content section { padding: var(--oamr-space-3); border-radius: var(--oamr-radius-md); background: var(--md-sys-color-surface-container-high); animation: oamr-enter var(--oamr-motion) var(--oamr-ease) both; }
 .tutorial-content h3 { margin: 0 0 5px; font-size: 1rem; }
@@ -172,6 +178,8 @@ md-divider { margin: var(--oamr-space-4) 0; }
   .discovery-device { grid-template-columns: 1fr; }
   .discovery-device md-filled-button { width: 100%; }
   .dialog-form { width: min(100%, 360px); min-width: 0; padding-inline: var(--oamr-space-4); }
+  .mixer-gain-control { grid-template-columns: minmax(0, 1fr) auto; }
+  .mixer-gain-control md-slider { grid-column: 1 / -1; grid-row: 2; }
   .tutorial-content { max-width: 100%; gap: var(--oamr-space-2); }
   .tutorial-content section { padding: var(--oamr-space-2); }
   .tutorial-content { max-height: 62vh; overflow-y: auto; padding-inline-end: 2px; }

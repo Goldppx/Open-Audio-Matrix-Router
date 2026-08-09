@@ -7,6 +7,7 @@ import '@material/web/divider/divider.js';
 import '@material/web/iconbutton/icon-button.js';
 import '@material/web/select/outlined-select.js';
 import '@material/web/select/select-option.js';
+import '@material/web/slider/slider.js';
 import '@material/web/textfield/outlined-text-field.js';
 import './style.css';
 
@@ -23,13 +24,15 @@ type Peer = {
 };
 type DiscoveredDevice = { nodeId: string; alias: string; host: string; port: number };
 type DiscoveryState = { enabled: boolean; devices: DiscoveredDevice[] };
-type Route = { id: number; label: string; enabled: boolean; network: boolean; quality?: Quality; latency?: number; mode?: Mode };
+type MixerInput = { label: string; gain: number };
+type Route = { id: number; label: string; enabled: boolean; network: boolean; quality?: Quality; latency?: number; mode?: Mode; mixerInputs: MixerInput[] };
 type MatrixChoice = {
   key: string; source?: string; sink?: string; kind?: 'send' | 'receive'; peer?: string;
   remote?: string; local?: string; loopback: boolean; sourceName: string; targetName: string;
 };
 type Checkable = HTMLElement & { checked: boolean };
 type ValueElement = HTMLElement & { value: string };
+type SliderElement = HTMLElement & { value?: number };
 type DialogElement = HTMLElement & { show: () => Promise<void>; close: () => Promise<void> };
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -455,7 +458,7 @@ function renderMatrix(): void {
 function renderRoutes(routes: Route[]): void {
   const rows = routes.map(route => {
     const deleteClass = deleteConfirmation === route.id ? 'danger-action' : '';
-    const configuration = route.network ? iconButton(`data-config="${route.id}"`, uiLabel('配置路线', 'Configure route'), icons.edit) : '';
+    const configuration = route.network || route.mixerInputs.length ? iconButton(`data-config="${route.id}"`, uiLabel('配置路线', 'Configure route'), icons.edit) : '';
     const toggle = iconButton(`data-toggle="${route.id}" data-enabled="${!route.enabled}"`, route.enabled ? uiLabel('暂停路线', 'Pause route') : uiLabel('恢复路线', 'Resume route'), route.enabled ? icons.pause : icons.play);
     const deletion = iconButton(`data-delete="${route.id}"`, deleteConfirmation === route.id ? uiLabel('确认删除路线', 'Confirm route deletion') : uiLabel('删除路线', 'Delete route'), icons.delete, deleteClass);
     return `<tr><td>${escapeHtml(route.label)}</td><td>${route.enabled ? '运行中' : '已暂停'}</td><td>${route.network ? `${route.quality} · ${route.latency} ms · ${route.mode}` : '本地路线'}</td><td><div class="route-actions">${toggle}${configuration}${deletion}</div></td></tr>`;
@@ -478,18 +481,33 @@ function openRouteDialog(route: Route): void {
   if (!dialog) {
     dialog = document.createElement('md-dialog') as HTMLElement & { show: () => void; close: () => void };
     dialog.id = 'routeDialog';
-    dialog.innerHTML = `<div slot="headline">路线配置</div><div slot="content" class="dialog-form"><md-outlined-select id="routeQuality" label="音质"><md-select-option value="low"><div slot="headline">低</div></md-select-option><md-select-option value="medium"><div slot="headline">中</div></md-select-option><md-select-option value="high"><div slot="headline">高</div></md-select-option></md-outlined-select><md-outlined-select id="routeLatency" label="最大延迟"><md-select-option value="40"><div slot="headline">40 ms</div></md-select-option><md-select-option value="60"><div slot="headline">60 ms</div></md-select-option><md-select-option value="100"><div slot="headline">100 ms</div></md-select-option><md-select-option value="150"><div slot="headline">150 ms</div></md-select-option></md-outlined-select><md-outlined-select id="routeMode" label="模式"><md-select-option value="stable"><div slot="headline">稳定模式</div></md-select-option><md-select-option value="auto"><div slot="headline">自动模式</div></md-select-option><md-select-option value="low-latency"><div slot="headline">低延迟模式</div></md-select-option></md-outlined-select></div><div slot="actions"><md-text-button id="cancelRoute">取消</md-text-button><md-filled-button id="saveRoute">保存</md-filled-button></div>`;
     document.body.append(dialog);
-    byId<HTMLElement>('cancelRoute').addEventListener('click', () => dialog?.close());
+  }
+  const mixerControls = route.mixerInputs.map((input, index) => {
+    const percent = Math.round(input.gain * 100);
+    return `<label class="mixer-gain-control"><span>${escapeHtml(input.label)}</span><md-slider min="0" max="200" value="${percent}" step="1" aria-label="${escapeHtml(input.label)}" data-mixer-gain="${index}"></md-slider><output data-mixer-gain-value="${index}">${percent}%</output></label>`;
+  }).join('');
+  const networkControls = route.network ? `<md-outlined-select id="routeQuality" label="${uiLabel('音质', 'Quality')}"><md-select-option value="low"><div slot="headline">${uiLabel('低', 'Low')}</div></md-select-option><md-select-option value="medium"><div slot="headline">${uiLabel('中', 'Medium')}</div></md-select-option><md-select-option value="high"><div slot="headline">${uiLabel('高', 'High')}</div></md-select-option></md-outlined-select><md-outlined-select id="routeLatency" label="${uiLabel('最大延迟', 'Maximum latency')}"><md-select-option value="40"><div slot="headline">40 ms</div></md-select-option><md-select-option value="60"><div slot="headline">60 ms</div></md-select-option><md-select-option value="100"><div slot="headline">100 ms</div></md-select-option><md-select-option value="150"><div slot="headline">150 ms</div></md-select-option></md-outlined-select><md-outlined-select id="routeMode" label="${uiLabel('模式', 'Mode')}"><md-select-option value="stable"><div slot="headline">${uiLabel('稳定模式', 'Stable')}</div></md-select-option><md-select-option value="auto"><div slot="headline">${uiLabel('自动模式', 'Auto')}</div></md-select-option><md-select-option value="low-latency"><div slot="headline">${uiLabel('低延迟模式', 'Low latency')}</div></md-select-option></md-outlined-select>` : '';
+  dialog.innerHTML = `<div slot="headline">${uiLabel('路线配置', 'Route configuration')}</div><div slot="content" class="dialog-form">${mixerControls ? `<section class="mixer-gains"><strong>${uiLabel('混音音量', 'Mixer levels')}</strong><span>${uiLabel('拖动后立即生效', 'Changes apply immediately')}</span>${mixerControls}</section>` : ''}${networkControls}</div><div slot="actions"><md-text-button id="cancelRoute">${uiLabel('关闭', 'Close')}</md-text-button>${route.network ? `<md-filled-button id="saveRoute">${uiLabel('保存网络设置', 'Save network settings')}</md-filled-button>` : ''}</div>`;
+  byId<HTMLElement>('cancelRoute').addEventListener('click', () => dialog?.close());
+  if (route.network) {
+    byId<ValueElement>('routeQuality').value = route.quality ?? 'medium';
+    byId<ValueElement>('routeLatency').value = String(route.latency ?? 100);
+    byId<ValueElement>('routeMode').value = route.mode ?? 'auto';
     byId<HTMLElement>('saveRoute').addEventListener('click', () => void (async () => {
       if (!selectedRoute) return;
       await post(`/api/routes/${selectedRoute.id}/profile?quality=${value('routeQuality')}&max-latency-ms=${value('routeLatency')}&mode=${value('routeMode')}`);
       dialog?.close();
     })());
   }
-  byId<ValueElement>('routeQuality').value = route.quality ?? 'medium';
-  byId<ValueElement>('routeLatency').value = String(route.latency ?? 100);
-  byId<ValueElement>('routeMode').value = route.mode ?? 'auto';
+  document.querySelectorAll<SliderElement>('[data-mixer-gain]').forEach(control => control.addEventListener('input', () => {
+    const input = control.dataset.mixerGain!;
+    const percent = control.value ?? 0;
+    const gain = percent / 100;
+    const output = document.querySelector<HTMLOutputElement>(`[data-mixer-gain-value="${input}"]`);
+    if (output) output.value = `${percent}%`;
+    void request(`/api/routes/${route.id}/mixer/gain?input=${input}&gain=${gain}`, 'POST').catch(error => logEvent(error instanceof Error ? error.message : String(error), 'ERROR'));
+  }));
   dialog.show();
 }
 

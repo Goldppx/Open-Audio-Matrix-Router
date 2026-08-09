@@ -29,6 +29,7 @@ public:
     bool start_loopback(const audio::LoopbackSettings& settings);
     bool start_local_fanout(const audio::FanoutSettings& settings);
     bool start_local_matrix(const audio::MatrixSettings& settings);
+    bool set_mixer_input_gain(std::size_t input_index, double gain);
     void stop() noexcept;
     /** Returns false after a GStreamer ERROR or EOS message and updates last_error(). */
     bool poll();

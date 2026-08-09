@@ -30,6 +30,7 @@ public:
     bool poll() override { return pipeline_.poll(); }
     [[nodiscard]] bool is_running() const noexcept override { return pipeline_.is_running(); }
     [[nodiscard]] const std::string& last_error() const noexcept override { return pipeline_.last_error(); }
+    bool set_mixer_input_gain(std::size_t input_index, double gain) override { return pipeline_.set_mixer_input_gain(input_index, gain); }
     [[nodiscard]] std::optional<audio::TransportTelemetry> transport_telemetry() const noexcept override { return pipeline_.transport_telemetry(); }
 
 private:

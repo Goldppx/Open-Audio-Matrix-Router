@@ -179,6 +179,11 @@ using RouteSettings = std::variant<audio::LoopbackSettings, audio::FanoutSetting
 } // namespace
 class WebServer::Impl {
 public:
+    struct MixerInputControl {
+        std::string label;
+        double gain{1.0};
+    };
+
     struct ActiveRoute {
         std::size_t id{};
         std::string label;
@@ -186,6 +191,7 @@ public:
         RouteSettings settings;
         std::optional<audio::NetworkProfile> network_profile;
         std::unique_ptr<audio::AudioRoute> route;
+        std::vector<MixerInputControl> mixer_inputs;
     };
 
     std::atomic_bool stopping{false};
@@ -211,22 +217,45 @@ public:
         }, settings);
     }
 
-    bool add_route(std::string label, RouteSettings settings) {
+    bool add_route(std::string label, RouteSettings settings, std::vector<MixerInputControl> mixer_inputs = {}) {
         if (!backend) { error = "No audio backend is available."; diagnostics::write(diagnostics::Level::Error, error); return false; }
         auto route = start_route(settings);
         if (!route) { error = backend->last_error(); diagnostics::write(diagnostics::Level::Error, "Could not start local route: " + error); return false; }
         diagnostics::write(diagnostics::Level::Info, "Started route: " + label);
-        routes.push_back({next_route_id++, std::move(label), true, std::move(settings), std::nullopt, std::move(route)});
+        routes.push_back({next_route_id++, std::move(label), true, std::move(settings), std::nullopt, std::move(route), std::move(mixer_inputs)});
         return true;
     }
 
-    bool add_network_route(std::string label, const audio::NetworkProfile& profile, RouteSettings settings) {
+    bool add_network_route(std::string label, const audio::NetworkProfile& profile, RouteSettings settings, std::vector<MixerInputControl> mixer_inputs = {}) {
         if (!backend) { error = "No audio backend is available."; diagnostics::write(diagnostics::Level::Error, error); return false; }
         auto route = start_route(settings);
         if (!route) { error = backend->last_error(); diagnostics::write(diagnostics::Level::Error, "Could not start network route: " + error); return false; }
         diagnostics::write(diagnostics::Level::Info, "Started network route: " + label + " [" + quality_name(profile.quality) + ", " + std::to_string(profile.max_latency_ms) + " ms, " + mode_name(profile.mode) + "]");
-        routes.push_back({next_route_id++, std::move(label), true, std::move(settings), profile, std::move(route)});
+        routes.push_back({next_route_id++, std::move(label), true, std::move(settings), profile, std::move(route), std::move(mixer_inputs)});
         return true;
+    }
+
+    bool set_route_mixer_gain(std::size_t id, std::size_t input_index, double gain) {
+        if (gain < 0.0 || gain > 2.0) { error = "Mixer gain must be between 0 and 200 percent."; return false; }
+        for (auto& item : routes) {
+            if (item.id != id) continue;
+            if (input_index >= item.mixer_inputs.size()) { error = "Mixer input was not found."; return false; }
+            if (item.enabled && item.route && !item.route->set_mixer_input_gain(input_index, gain)) {
+                error = item.route->last_error();
+                diagnostics::write(diagnostics::Level::Error, "Could not change mixer gain: " + error);
+                return false;
+            }
+            std::visit([input_index, gain](auto& settings) {
+                using T = std::decay_t<decltype(settings)>;
+                if constexpr (std::is_same_v<T, audio::MatrixSettings>) settings.routes[input_index].gain = gain;
+                else if constexpr (std::is_same_v<T, audio::NetworkMixerSettings>) settings.inputs[input_index].gain = gain;
+            }, item.settings);
+            item.mixer_inputs[input_index].gain = gain;
+            diagnostics::write(diagnostics::Level::Info, "Updated mixer input gain for route: " + item.label);
+            return true;
+        }
+        error = "Route " + std::to_string(id) + " was not found.";
+        return false;
     }
 
     bool set_route_enabled(std::size_t id, bool enable) {
@@ -412,7 +441,7 @@ public:
         if (method == "GET" && target.rfind("/api/devices", 0) == 0) { type = "application/json; charset=utf-8"; return devices_json(); }
         if (method == "GET" && target.rfind("/api/routes", 0) == 0) {
             type = "application/json; charset=utf-8"; std::ostringstream out; out << '['; bool first = true;
-            for (const auto& item : routes) { if (!first) out << ','; first = false; out << "{\"id\":" << item.id << ",\"label\":\"" << json_escape(item.label) << "\",\"enabled\":" << (item.enabled ? "true" : "false") << ",\"network\":" << (item.network_profile ? "true" : "false"); if (item.network_profile) out << ",\"quality\":\"" << quality_name(item.network_profile->quality) << "\",\"latency\":" << item.network_profile->max_latency_ms << ",\"mode\":\"" << mode_name(item.network_profile->mode) << "\""; out << "}"; }
+            for (const auto& item : routes) { if (!first) out << ','; first = false; out << "{\"id\":" << item.id << ",\"label\":\"" << json_escape(item.label) << "\",\"enabled\":" << (item.enabled ? "true" : "false") << ",\"network\":" << (item.network_profile ? "true" : "false"); if (item.network_profile) out << ",\"quality\":\"" << quality_name(item.network_profile->quality) << "\",\"latency\":" << item.network_profile->max_latency_ms << ",\"mode\":\"" << mode_name(item.network_profile->mode) << "\""; out << ",\"mixerInputs\":["; bool input_first = true; for (const auto& input : item.mixer_inputs) { if (!input_first) out << ','; input_first = false; out << "{\"label\":\"" << json_escape(input.label) << "\",\"gain\":" << input.gain << '}'; } out << "]}"; }
             return out << ']', out.str();
         }
         if (method == "GET" && target.rfind("/api/pair/code", 0) == 0) return pairing.current_pair_code();
@@ -502,6 +531,7 @@ public:
             const auto peer_list = pairing.peers();
             audio::NetworkMixerSettings settings;
             settings.sink_device = sink;
+            std::vector<MixerInputControl> mixer_inputs;
             for (std::size_t index = 0; index < rows.size(); ++index) {
                 const auto peer = std::find_if(peer_list.begin(), peer_list.end(), [&](const auto& value) { return value.node_id == rows[index].peer_id; });
                 if (peer == peer_list.end()) return "A selected paired source is no longer available.";
@@ -518,8 +548,10 @@ public:
                     return "Remote mixer sender failed: " + pairing.last_error();
                 }
                 settings.inputs.push_back({media_port, profile});
+                const auto endpoint = std::find_if(peer->endpoints.begin(), peer->endpoints.end(), [&](const auto& value) { return value.backend_id == rows[index].remote_device; });
+                mixer_inputs.push_back({peer->alias + " · " + (endpoint == peer->endpoints.end() ? rows[index].remote_device : endpoint->name), 1.0});
             }
-            if (!add_network_route("Network mixer (" + std::to_string(settings.inputs.size()) + " sources) → " + sink, profile, settings))
+            if (!add_network_route("Network mixer (" + std::to_string(settings.inputs.size()) + " sources) → " + sink, profile, settings, std::move(mixer_inputs)))
                 return "Network mixer failed: " + error;
             return "Network mixer route added.";
         }
@@ -591,13 +623,30 @@ public:
                 if (sink_new) settings.sink_devices.push_back(sink);
                 settings.routes.push_back({source_it->second, sink_it->second});
             }
-            if (add_route("Local matrix (" + std::to_string(settings.routes.size()) + " links)", settings)) return "Matrix route added.";
+            std::vector<MixerInputControl> mixer_inputs;
+            const auto listed_sources = backend ? backend->list_sources() : std::vector<audio::DeviceInfo>{};
+            for (const auto& matrix_route : settings.routes) {
+                const auto& source = settings.source_devices[matrix_route.source_index];
+                const auto match = std::find_if(listed_sources.begin(), listed_sources.end(), [&](const auto& device) { return device.id == source; });
+                std::string fallback = audio::selector_device_id(source);
+                if (fallback.empty()) fallback = source.substr(0, source.find('|'));
+                mixer_inputs.push_back({match == listed_sources.end() ? std::move(fallback) : match->name, matrix_route.gain});
+            }
+            if (add_route("Local matrix (" + std::to_string(settings.routes.size()) + " links)", settings, std::move(mixer_inputs))) return "Matrix route added.";
             return "Matrix failed: " + error;
         }
         if (method == "POST" && target.rfind("/api/routes/", 0) == 0) {
             const auto slash = target.find('/', std::string_view{"/api/routes/"}.size()); const auto id_text = target.substr(std::string_view{"/api/routes/"}.size(), slash - std::string_view{"/api/routes/"}.size()); std::size_t id{};
             try { id = std::stoull(id_text); } catch (...) { return "Invalid route id."; }
             if (target.find("/toggle", slash) != std::string::npos) { const auto enabled = query_params(target).contains("enabled") && query_params(target).at("enabled") == "true"; return set_route_enabled(id, enabled) ? "Route updated." : "Could not update route: " + error; }
+            if (target.find("/mixer/gain", slash) != std::string::npos) {
+                const auto query = query_params(target);
+                try {
+                    const auto input = std::stoull(query.at("input"));
+                    const double gain = std::stod(query.at("gain"));
+                    return set_route_mixer_gain(id, input, gain) ? "Mixer gain updated." : "Could not update mixer gain: " + error;
+                } catch (...) { return "Invalid mixer gain request."; }
+            }
             if (target.find("/profile", slash) != std::string::npos) { audio::NetworkProfile profile; const auto query = query_params(target); return network_profile_from(query, profile) && update_network_route(id, profile) ? "Route properties updated." : "Could not update route properties: " + error; }
             if (target.find("/delete", slash) != std::string::npos) return erase_route(id) ? "Route deleted." : "Route not found.";
         }

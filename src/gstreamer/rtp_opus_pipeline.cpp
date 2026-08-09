@@ -79,7 +79,8 @@ std::string network_mixer_description(const audio::NetworkMixerSettings& setting
                  << "! rtpjitterbuffer name=receiver_jitter" << index
                  << " latency=" << network.jitter_buffer_ms
                  << " drop-on-latency=" << (network.drop_on_latency ? "true" : "false")
-                 << " do-lost=true ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! audioconvert ! queue ! mix. ";
+                 << " do-lost=true ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! audioconvert ! queue ! volume name=mix_gain" << index
+                 << " volume=" << settings.inputs[index].gain << " ! mix. ";
     }
     pipeline << "audiomixer name=mix ! audioconvert ! audioresample ! audioconvert ! "
              << sink.factory << " name=sink sync=true";
@@ -122,8 +123,11 @@ std::string matrix_description(const audio::MatrixSettings& settings) {
             pipeline << " loopback=true low-latency=true";
         pipeline << " ! audioconvert ! audioresample ! tee name=split" << source << ' ';
     }
-    for (const auto& route : settings.routes)
-        pipeline << "split" << route.source_index << ". ! queue ! mix" << route.sink_index << ". ";
+    for (std::size_t index = 0; index < settings.routes.size(); ++index) {
+        const auto& route = settings.routes[index];
+        pipeline << "split" << route.source_index << ". ! queue ! volume name=mix_gain" << index
+                 << " volume=" << route.gain << " ! mix" << route.sink_index << ". ";
+    }
     for (std::size_t sink = 0; sink < settings.sink_devices.size(); ++sink) {
         const auto selected = parse_selector(settings.sink_devices[sink], "autoaudiosink");
         pipeline << "audiomixer name=mix" << sink << " ! audioconvert ! audioresample ! audioconvert ! "
@@ -264,13 +268,30 @@ bool RtpOpusPipeline::start_network_mixer(const audio::NetworkMixerSettings& set
         return false;
     }
     for (const auto& input : settings.inputs) {
-        if (input.port == 0 || !audio::resolve_network_profile(input.network)) {
+        if (input.port == 0 || input.gain < 0.0 || input.gain > 2.0 || !audio::resolve_network_profile(input.network)) {
             impl_->error = "Network mixer input requires a non-zero port and valid network profile.";
             return false;
         }
     }
     return impl_->start(network_mixer_description(settings),
                         parse_selector(settings.sink_device, "autoaudiosink").device, "sink");
+}
+
+bool RtpOpusPipeline::set_mixer_input_gain(std::size_t input_index, double gain) {
+    if (impl_->pipeline == nullptr || gain < 0.0 || gain > 2.0) {
+        impl_->error = "Mixer gain must be between 0.0 and 2.0 on a running mixer route.";
+        return false;
+    }
+    const std::string element_name = "mix_gain" + std::to_string(input_index);
+    GstElement* volume = gst_bin_get_by_name(GST_BIN(impl_->pipeline), element_name.c_str());
+    if (volume == nullptr) {
+        impl_->error = "Mixer input was not found.";
+        return false;
+    }
+    g_object_set(volume, "volume", gain, nullptr);
+    gst_object_unref(volume);
+    impl_->error.clear();
+    return true;
 }
 
 bool RtpOpusPipeline::start_loopback(const audio::LoopbackSettings& settings) {
@@ -298,6 +319,12 @@ bool RtpOpusPipeline::start_local_fanout(const audio::FanoutSettings& settings) 
 bool RtpOpusPipeline::start_local_matrix(const audio::MatrixSettings& settings) {
     if (settings.source_devices.empty() || settings.sink_devices.empty() || settings.routes.empty() || !valid_pcm(settings.pcm)) {
         impl_->error = "Local matrix requires sources, sinks, routes, and valid PCM settings.";
+        return false;
+    }
+    if (std::any_of(settings.routes.begin(), settings.routes.end(), [&](const audio::MatrixRoute& route) {
+        return route.source_index >= settings.source_devices.size() || route.sink_index >= settings.sink_devices.size() || route.gain < 0.0 || route.gain > 2.0;
+    })) {
+        impl_->error = "Local matrix routes require valid endpoints and gains between 0.0 and 2.0.";
         return false;
     }
     std::vector<Impl::DeviceBinding> devices;
