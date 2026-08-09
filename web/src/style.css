@@ -27,7 +27,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
+body { margin: 0; min-width: 0; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
 button, input, select { font: inherit; }
 
 .app-shell { max-width: var(--oamr-content-max); margin: 0 auto; padding: var(--oamr-space-5); }
@@ -62,7 +62,7 @@ button, input, select { font: inherit; }
 md-filled-button, md-outlined-button, md-text-button, md-icon-button { transition: transform var(--oamr-motion) var(--oamr-ease); }
 @media (hover: hover) and (pointer: fine) { md-filled-button:hover, md-outlined-button:hover, md-text-button:hover, md-icon-button:hover { transform: translateY(-1px); } }
 md-outlined-text-field, md-filled-select { width: 100%; }
-md-outlined-select { width: 100%; min-width: 0; max-width: 100%; overflow: hidden; }
+md-outlined-select { width: 100%; min-width: 0; max-width: 100%; }
 md-outlined-select md-select-option { min-width: 0; max-width: 100%; }
 md-outlined-select md-select-option [slot="headline"] { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 md-divider { margin: var(--oamr-space-4) 0; }
