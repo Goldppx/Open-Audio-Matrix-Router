@@ -4,6 +4,7 @@
 #include "rtp_opus_pipeline.h"
 
 #include <memory>
+#include <cctype>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -58,10 +59,22 @@ std::string render_source_selector(const std::string& sink_selector) {
 std::string monitor_sink_selector(const audio::DeviceInfo& source,
                                   const std::vector<audio::DeviceInfo>& sinks) {
     constexpr std::string_view prefix{"Monitor of "};
-    if (source.name.rfind(prefix, 0) != 0) return {};
-    const std::string sink_name = source.name.substr(prefix.size());
-    for (const auto& sink : sinks)
-        if (sink.name == sink_name) return sink.id;
+    if (source.name.rfind(prefix, 0) == 0) {
+        const std::string sink_name = source.name.substr(prefix.size());
+        for (const auto& sink : sinks)
+            if (sink.name == sink_name) return sink.id;
+    }
+#ifndef _WIN32
+    // PipeWire and PulseAudio differ in their display names. A monitor is
+    // still a valid capture source even when its matching sink is unavailable
+    // (for example after unplugging a USB device), so use an empty semantic
+    // link rather than discarding it.
+    std::string lower = source.name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char value) {
+        return static_cast<char>(std::tolower(value));
+    });
+    if (lower.find("monitor") != std::string::npos) return {};
+#endif
     return {};
 }
 

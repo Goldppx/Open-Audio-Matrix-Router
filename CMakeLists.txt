@@ -17,17 +17,28 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(GNUInstallDirs)
-include(FetchContent)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# Boost.Beast/Asio is used only by OAMR's LAN control plane.  Fetch the
-# official, fixed source release at configure time so the portable runtime has
-# no Boost DLL dependency.
-set(BOOST_INCLUDE_LIBRARIES beast asio system)
-FetchContent_Declare(oamr_boost
-    URL https://github.com/boostorg/boost/releases/download/boost-1.89.0/boost-1.89.0-cmake.tar.xz
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-FetchContent_MakeAvailable(oamr_boost)
+# Boost.Beast/Asio is used only by OAMR's LAN control plane. Linux uses its
+# distribution package so an offline configure remains possible; Boost.System
+# is explicitly header-only there. Windows keeps the fixed source release so
+# the portable package has no Boost DLL dependency.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Boost 1.89 REQUIRED CONFIG COMPONENTS headers)
+    foreach(_boost_component IN ITEMS beast asio system)
+        add_library(oamr_boost_${_boost_component} INTERFACE)
+        target_link_libraries(oamr_boost_${_boost_component} INTERFACE Boost::headers)
+        target_compile_definitions(oamr_boost_${_boost_component} INTERFACE BOOST_ERROR_CODE_HEADER_ONLY)
+        add_library(Boost::${_boost_component} ALIAS oamr_boost_${_boost_component})
+    endforeach()
+else()
+    include(FetchContent)
+    set(BOOST_INCLUDE_LIBRARIES beast asio system)
+    FetchContent_Declare(oamr_boost
+        URL https://github.com/boostorg/boost/releases/download/boost-1.89.0/boost-1.89.0-cmake.tar.xz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(oamr_boost)
+endif()
 
 # ---------------------------------------------------------------------------
 # oamr_core: platform-neutral graph model. No audio, socket, or UI dependency.
@@ -179,6 +190,7 @@ if(OAMR_BUILD_TESTS)
             add_executable(oamr_gstreamer_smoke_tests tests/gstreamer_smoke_tests.cpp)
             target_link_libraries(oamr_gstreamer_smoke_tests PRIVATE oamr::gstreamer)
             add_test(NAME oamr_gstreamer_smoke_tests COMMAND oamr_gstreamer_smoke_tests)
+            set_tests_properties(oamr_gstreamer_smoke_tests PROPERTIES SKIP_RETURN_CODE 77)
             if(WIN32 AND DEFINED GSTREAMER_RUNTIME_ROOT)
                 # CTest bypasses run-oamr.cmd, so provide the same runtime
                 # loader and plugin paths used by the portable package.

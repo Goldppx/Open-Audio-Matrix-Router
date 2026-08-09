@@ -385,7 +385,8 @@ public:
         bool first = true;
         for (const auto& device : sources) {
             if (device.is_default) continue;
-            if (!first) json << ','; first = false;
+            if (!first) json << ',';
+            first = false;
             const bool render_loopback = !device.loopback_of.empty();
             const std::string endpoint = audio::selector_device_id(render_loopback ? device.loopback_of : device.id);
             json << "{\"id\":\"" << json_escape(device.id) << "\",\"name\":\"";
@@ -397,14 +398,16 @@ public:
         first = true;
         for (const auto& device : sources) {
             if (device.is_default || device.loopback_of.empty()) continue;
-            if (!first) json << ','; first = false;
+            if (!first) json << ',';
+            first = false;
             json << "{\"id\":\"" << json_escape(device.id) << "\",\"name\":\"" << json_escape(device.name) << "\"}";
         }
         json << "],\"sinks\":[";
         first = true;
         for (const auto& device : sinks) {
             if (device.is_default) continue;
-            if (!first) json << ','; first = false;
+            if (!first) json << ',';
+            first = false;
             json << "{\"id\":\"" << json_escape(device.id) << "\",\"name\":\"" << json_escape(device.name)
                  << "\",\"endpoint\":\"" << json_escape(audio::selector_device_id(device.id)) << "\"}";
         }
@@ -430,7 +433,8 @@ public:
             }
             std::ostringstream out; out << '['; bool first = true;
             for (const auto& entry : diagnostics::entries_after(after)) {
-                if (!first) out << ','; first = false;
+                if (!first) out << ',';
+                first = false;
                 const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(entry.timestamp.time_since_epoch()).count();
                 out << "{\"sequence\":" << entry.sequence << ",\"timestamp\":" << timestamp
                     << ",\"level\":\"" << diagnostics::level_name(entry.level) << "\",\"message\":\""

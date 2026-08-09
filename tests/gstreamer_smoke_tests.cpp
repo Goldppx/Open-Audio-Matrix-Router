@@ -1,9 +1,23 @@
 #include "oamr/audio/backend_factory.hpp"
 
 #include <cassert>
+#include <gst/gst.h>
 #include <iostream>
 
 int main() {
+    gst_init(nullptr, nullptr);
+    // Minimal Linux installations can have the GStreamer development headers
+    // while omitting the runtime RTP/UDP plugins. This is an environment
+    // prerequisite, not a backend regression; CTest maps 77 to SKIPPED.
+    for (const char* factory_name : {"opusenc", "rtpopuspay", "udpsink", "rtpjitterbuffer", "rtpopusdepay", "fakesink", "audiotestsrc"}) {
+        GstElementFactory* factory = gst_element_factory_find(factory_name);
+        if (factory == nullptr) {
+            std::cout << "SKIP: required GStreamer factory is unavailable: " << factory_name << "\n";
+            return 77;
+        }
+        gst_object_unref(factory);
+    }
+
     // Exercises the platform-neutral factory against the compiled backend.
     // GStreamer's test generator supplies the source, never physical audio
     // hardware; this catches sender caps regressions across every profile.

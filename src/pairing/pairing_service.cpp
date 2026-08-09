@@ -75,6 +75,7 @@ std::vector<IPv4Interface> active_ipv4_interfaces(Socket socket) {
             result.push_back({address->sin_addr, netmask->sin_addr});
     }
 #else
+    (void)socket;
     ifaddrs* first{};
     if (getifaddrs(&first) != 0) return result;
     for (auto* entry = first; entry; entry = entry->ifa_next) {
@@ -273,7 +274,7 @@ public:
             else if (fields.size() >= 2 && fields[0] == "discovery") discovery_enabled = fields[1] == "1";
             else if (fields.size() >= 4 && fields[0] == "endpoint") exposed.push_back({unescape(fields[2]), unescape(fields[3]), fields[1] == "S" ? EndpointDirection::Source : EndpointDirection::Sink});
             else if (fields.size() >= 2 && fields[0] == "telemetry") local_telemetry = deserialize_telemetry(unescape(fields[1]));
-            else if (fields.size() >= 6 && fields[0] == "peer") { try { RemotePeer peer{unescape(fields[1]), unescape(fields[2]), unescape(fields[3]), static_cast<std::uint16_t>(std::stoul(fields[4])), deserialize(unescape(fields[5]))}; if (fields.size() >= 7) peer.telemetry = deserialize_telemetry(unescape(fields[6])); known_peers[peer.node_id] = std::move(peer); } catch (...) {} }
+            else if (fields.size() >= 6 && fields[0] == "peer") { try { RemotePeer peer{unescape(fields[1]), unescape(fields[2]), unescape(fields[3]), static_cast<std::uint16_t>(std::stoul(fields[4])), deserialize(unescape(fields[5])), {}}; if (fields.size() >= 7) peer.telemetry = deserialize_telemetry(unescape(fields[6])); known_peers[peer.node_id] = std::move(peer); } catch (...) {} }
         }
     }
 
@@ -400,7 +401,7 @@ public:
         unsigned port{}; try { port = static_cast<unsigned>(std::stoul(peer_port->second)); } catch (...) { return "error=invalid-port"; }
         if (port == 0 || port > 65535) return "error=invalid-port";
         pair_code.clear();
-        known_peers[node->second] = {node->second, peer_alias->second, host, static_cast<std::uint16_t>(port), {}};
+        known_peers[node->second] = {node->second, peer_alias->second, host, static_cast<std::uint16_t>(port), {}, {}};
         save_unlocked();
         diagnostics::write(diagnostics::Level::Info, "Accepted pairing request from " + peer_alias->second + " at " + host + ":" + std::to_string(port) + ".");
         return "node=" + escape(node_id) + "&alias=" + escape(alias) + "&catalog=" + escape(serialize(exposed));
@@ -496,7 +497,7 @@ bool PairingService::pair_remote(const std::string& host, std::uint16_t port, co
     const auto reply = params("?" + response.body);
     if (reply.contains("error") || !reply.contains("node")) { impl_->error = reply.contains("error") ? reply.at("error") : "Invalid pairing response."; return false; }
     const auto remote_alias = reply.contains("alias") && !reply.at("alias").empty() ? reply.at("alias") : host;
-    { std::lock_guard lock(impl_->mutex); impl_->known_peers[reply.at("node")] = {reply.at("node"), remote_alias, host, port, deserialize(reply.contains("catalog") ? reply.at("catalog") : "")}; impl_->save_unlocked(); }
+    { std::lock_guard lock(impl_->mutex); impl_->known_peers[reply.at("node")] = {reply.at("node"), remote_alias, host, port, deserialize(reply.contains("catalog") ? reply.at("catalog") : ""), {}}; impl_->save_unlocked(); }
     announce();
     return true;
 }

@@ -140,8 +140,15 @@ void set_device_if_supported(GstElement* pipeline, const gchar* element_name, co
     if (device.empty()) return;
     GstElement* element = gst_bin_get_by_name(GST_BIN(pipeline), element_name);
     if (!element) return;
-    if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), "device") != nullptr)
-        g_object_set(element, "device", device.c_str(), nullptr);
+    // `device` is used by WASAPI, PulseAudio and ALSA. PipeWire plugins use
+    // `path` or `target-object` depending on their GStreamer version.
+    for (const char* property_name : {"device", "path", "target-object"}) {
+        GParamSpec* property = g_object_class_find_property(G_OBJECT_GET_CLASS(element), property_name);
+        if (property != nullptr && G_PARAM_SPEC_VALUE_TYPE(property) == G_TYPE_STRING) {
+            g_object_set(element, property_name, device.c_str(), nullptr);
+            break;
+        }
+    }
     gst_object_unref(element);
 }
 

@@ -2,6 +2,8 @@
 
 #include <gst/gst.h>
 
+#include <array>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -11,8 +13,32 @@ namespace {
 void unref_gst_object(gpointer object) { gst_object_unref(object); }
 
 bool is_default_name(const std::string& name) {
+#ifdef _WIN32
     // GStreamer's WASAPI provider labels defaults as "Default Audio ...".
     return name.rfind("Default Audio ", 0) == 0;
+#else
+    return name == "Default" || name == "default";
+#endif
+}
+
+const gchar* first_string_property(const GstStructure* properties,
+                                   std::initializer_list<const char*> names) {
+    if (properties == nullptr) return nullptr;
+    for (const char* name : names) {
+        const gchar* value = gst_structure_get_string(properties, name);
+        if (value != nullptr && *value != '\0') return value;
+    }
+    return nullptr;
+}
+
+std::string device_label(GstDevice* device, const gchar* fallback) {
+#ifndef _WIN32
+    const GstStructure* properties = gst_device_get_properties(device);
+    if (const gchar* label = first_string_property(properties,
+            {"node.description", "device.description", "node.nick", "device.nick", "description"}))
+        return label;
+#endif
+    return fallback ? fallback : "Unnamed device";
 }
 
 std::string selector_for(GstElement* element) {
@@ -20,12 +46,19 @@ std::string selector_for(GstElement* element) {
     GstElementFactory* factory = gst_element_get_factory(element);
     if (factory == nullptr) return {};
     std::string selector;
-    GParamSpec* property = g_object_class_find_property(G_OBJECT_GET_CLASS(element), "device");
-    if (property != nullptr && G_PARAM_SPEC_VALUE_TYPE(property) == G_TYPE_STRING) {
-        gchar* value = nullptr;
-        g_object_get(element, "device", &value, nullptr);
-        if (value != nullptr) {
-            selector = std::string(GST_OBJECT_NAME(factory)) + "|" + value;
+    // PipeWire exposes the reconnectable node as `path` or `target-object`,
+    // while PulseAudio/ALSA/WASAPI use `device`. All are encoded in the same
+    // public factory|selector format and are restored by the pipeline helper.
+    for (const char* property_name : {"device", "path", "target-object"}) {
+        GParamSpec* property = g_object_class_find_property(G_OBJECT_GET_CLASS(element), property_name);
+        if (property != nullptr && G_PARAM_SPEC_VALUE_TYPE(property) == G_TYPE_STRING) {
+            gchar* value = nullptr;
+            g_object_get(element, property_name, &value, nullptr);
+            if (value != nullptr && *value != '\0') {
+                selector = std::string(GST_OBJECT_NAME(factory)) + "|" + value;
+                g_free(value);
+                break;
+            }
             g_free(value);
         }
     }
@@ -51,7 +84,7 @@ std::vector<audio::DeviceInfo> list_devices(const gchar* klass, audio::PortDirec
         // discoverable but use the default endpoint until that backend gains a
         // selector (a trailing `|` marks them as default-only).
         result.push_back({selector.empty() ? std::string(factory_name) + "|" : selector,
-                          display_name ? display_name : "Unnamed device", direction,
+                          device_label(device, display_name), direction,
                           is_default_name(display_name ? display_name : ""), {}});
         if (element != nullptr) gst_object_unref(element);
     }
