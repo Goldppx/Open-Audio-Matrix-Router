@@ -260,7 +260,8 @@ bool PairingService::pair_remote(const std::string& host, std::uint16_t port, co
     if (!response.ok) { impl_->error = "Could not pair with host: " + response.error; return false; }
     const auto reply = params("?" + response.body);
     if (reply.contains("error") || !reply.contains("node")) { impl_->error = reply.contains("error") ? reply.at("error") : "Invalid pairing response."; return false; }
-    { std::lock_guard lock(impl_->mutex); impl_->known_peers[reply.at("node")] = {reply.at("node"), alias, host, port, deserialize(reply.contains("catalog") ? reply.at("catalog") : "")}; impl_->save_unlocked(); }
+    const auto remote_alias = reply.contains("alias") && !reply.at("alias").empty() ? reply.at("alias") : host;
+    { std::lock_guard lock(impl_->mutex); impl_->known_peers[reply.at("node")] = {reply.at("node"), remote_alias, host, port, deserialize(reply.contains("catalog") ? reply.at("catalog") : "")}; impl_->save_unlocked(); }
     announce();
     return true;
 }

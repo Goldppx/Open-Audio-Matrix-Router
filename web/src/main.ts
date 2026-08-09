@@ -5,8 +5,6 @@ import '@material/web/checkbox/checkbox.js';
 import '@material/web/dialog/dialog.js';
 import '@material/web/divider/divider.js';
 import '@material/web/iconbutton/icon-button.js';
-import '@material/web/menu/menu.js';
-import '@material/web/menu/menu-item.js';
 import '@material/web/select/outlined-select.js';
 import '@material/web/select/select-option.js';
 import '@material/web/textfield/outlined-text-field.js';
@@ -33,6 +31,7 @@ let peers: Peer[] = [];
 let matrixDirty = false;
 let deleteConfirmation: number | undefined;
 let selectedRoute: Route | undefined;
+let localAlias = 'This computer';
 type LogLevel = 'VERBOSE' | 'INFO' | 'WARNING' | 'ERROR';
 const logs: Array<{ level: LogLevel; message: string; time: string }> = [];
 const language = localStorage.getItem('oamr-language') === 'en' ? 'en' : 'zh-CN';
@@ -103,13 +102,13 @@ function renderShell(): void {
 
         <section class="card wide"><h2>音频矩阵</h2><div id="matrix" class="data-table-wrap"><div class="empty">正在加载设备…</div></div><div class="actions"><md-filled-button id="applyMatrix">添加已勾选的路线</md-filled-button></div></section>
 
-        <section class="card wide"><h2>设备配对</h2><div class="form-grid"><md-outlined-text-field id="localAlias" label="本机别名"></md-outlined-text-field><md-outlined-text-field label="配对控制端口" value="8791" disabled></md-outlined-text-field></div><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="form-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly></md-outlined-text-field><md-outlined-button id="newCode">生成新代码</md-outlined-button></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><div class="form-grid"><md-outlined-text-field id="peerPort" label="TCP 端口" type="number" value="8791"></md-outlined-text-field><md-outlined-text-field id="peerAlias" label="别名" placeholder="客厅电脑"></md-outlined-text-field></div><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field><md-filled-button id="pairRemote">开始配对</md-filled-button></div></div></section>
+        <section class="card wide"><h2>设备配对</h2><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="pairing-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly></md-outlined-text-field><md-outlined-button id="newCode">生成新代码</md-outlined-button></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field></div></div><div class="actions"><md-filled-button id="pairRemote">开始配对</md-filled-button></div></section>
 
         <section class="card wide"><h2>已配对设备与传输遥测</h2><div id="peerList" class="empty">尚未配对设备。</div></section>
         <section class="card wide"><h2>运行日志</h2><pre id="status" class="log">No log entries.</pre></section>
       </div>
     </main>
-    <md-dialog id="peerDialog"><div slot="headline">编辑已配对设备</div><form id="peerForm" slot="content" class="dialog-form" method="dialog"><md-outlined-text-field id="editAlias" label="别名"></md-outlined-text-field><md-outlined-text-field id="editHost" label="IP / 主机名"></md-outlined-text-field><md-outlined-text-field id="editPort" label="TCP 端口" type="number"></md-outlined-text-field></form><div slot="actions"><md-text-button id="cancelPeer">取消</md-text-button><md-filled-button id="savePeer">保存</md-filled-button></div></md-dialog>`;
+    <md-dialog id="peerDialog"><div slot="headline">更新设备地址</div><form id="peerForm" slot="content" class="dialog-form" method="dialog"><md-outlined-text-field id="editHost" label="IP / 主机名"></md-outlined-text-field></form><div slot="actions"><md-text-button id="cancelPeer">取消</md-text-button><md-filled-button id="savePeer">保存</md-filled-button></div></md-dialog>`;
 }
 
 function renderDeviceControls(): void {
@@ -129,16 +128,14 @@ function enhancePanels(): void {
     const languageLabel = language === 'en' ? 'Choose language' : '选择语言';
     const controls = document.createElement('div');
     controls.className = 'header-controls';
-    controls.innerHTML = `<span id="uiNotice" class="ui-notice"></span><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.87 15.07 10.33 12.56l.03-.03A17.3 17.3 0 0 0 14.07 6h2.86V4h-7V2h-2v2H1v2h11.17a15.4 15.4 0 0 1-2.82 5.35A15.1 15.1 0 0 1 7.35 8.6h-2a17 17 0 0 0 2.73 4.17l-5.07 5.02L4.41 19.2l5-5 3.11 3.11.35-2.24ZM18.5 10h-2l-4.5 12h2l1.12-3h4.75L21 22h2l-4.5-12Zm-2.63 7 1.63-4.33L19.13 17h-3.26Z"/></svg></md-icon-button><md-menu id="languageMenu" anchor="uiLanguage"><md-menu-item data-language="zh-CN"><div slot="headline">中文</div></md-menu-item><md-menu-item data-language="en"><div slot="headline">English</div></md-menu-item></md-menu><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.91-.1-1.35A7 7 0 0 1 12 3Z"/></svg></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button>`;
+    controls.innerHTML = `<span id="uiNotice" class="ui-notice"></span><div class="language-control"><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.87 15.07 10.33 12.56l.03-.03A17.3 17.3 0 0 0 14.07 6h2.86V4h-7V2h-2v2H1v2h11.17a15.4 15.4 0 0 1-2.82 5.35A15.1 15.1 0 0 1 7.35 8.6h-2a17 17 0 0 0 2.73 4.17l-5.07 5.02L4.41 19.2l5-5 3.11 3.11.35-2.24ZM18.5 10h-2l-4.5 12h2l1.12-3h4.75L21 22h2l-4.5-12Zm-2.63 7 1.63-4.33L19.13 17h-3.26Z"/></svg></md-icon-button><div id="languageMenu" class="language-menu" role="menu" hidden><md-text-button data-language="zh-CN">中文</md-text-button><md-text-button data-language="en">English</md-text-button></div></div><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.91-.1-1.35A7 7 0 0 1 12 3Z"/></svg></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button>`;
     header.append(controls);
-    byId<HTMLElement>('uiLanguage').addEventListener('click', () => {
-      const menu = byId<HTMLElement & { show: () => void }>('languageMenu');
-      menu.show();
-    });
+    byId<HTMLElement>('uiLanguage').addEventListener('click', () => { const menu = byId<HTMLElement>('languageMenu'); menu.hidden = !menu.hidden; });
     document.querySelectorAll<HTMLElement>('[data-language]').forEach(item => item.addEventListener('click', () => {
       localStorage.setItem('oamr-language', item.dataset.language ?? 'zh-CN');
       window.location.reload();
     }));
+    document.addEventListener('click', event => { if (!byId<HTMLElement>('uiLanguage').contains(event.target as Node) && !byId<HTMLElement>('languageMenu').contains(event.target as Node)) byId<HTMLElement>('languageMenu').hidden = true; });
     byId<HTMLElement>('themeToggle').addEventListener('click', () => { localStorage.setItem('oamr-theme', theme === 'dark' ? 'light' : 'dark'); window.location.reload(); });
     byId<HTMLElement>('refreshPage').addEventListener('click', () => window.location.reload());
   }
@@ -156,11 +153,12 @@ function enhancePanels(): void {
   if (!exposure.parentElement?.querySelector('.exposure-details')) {
     const details = document.createElement('details');
     details.className = 'exposure-details';
-    details.innerHTML = '<summary>选择要向已配对设备开放的本机端点</summary>';
+    details.innerHTML = '<summary>选择要向已配对设备开放的本机端点</summary><div class="exposure-content"></div>';
     exposure.replaceWith(details);
-    details.append(exposure);
+    const content = details.querySelector<HTMLElement>('.exposure-content')!;
+    content.append(exposure);
     save.parentElement?.replaceWith(save);
-    details.append(save);
+    content.append(save);
   }
 }
 
@@ -277,7 +275,7 @@ function renderPeers(): void {
   byId<HTMLElement>('peerList').innerHTML = peers.length ? peers.map(peer => {
     const telemetry = peer.telemetry.deviceName ? `音质 ${escapeHtml(peer.telemetry.quality)} · 目标延迟 ${peer.telemetry.latencyMs} ms · 丢包 ${peer.telemetry.packetLossPercent}% · 设备 ${escapeHtml(peer.telemetry.deviceName)}` : '当前没有传输音频';
     const endpoints = peer.endpoints.length ? peer.endpoints.map(endpoint => `<md-assist-chip class="endpoint-chip" label="${endpoint.direction === 'source' ? '来源' : '输出'} · ${escapeHtml(endpoint.name)}"></md-assist-chip>`).join('') : '<span class="muted">对方未开放设备</span>';
-    return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><md-text-button data-edit-peer="${escapeHtml(peer.nodeId)}">编辑</md-text-button></div><div class="muted">${escapeHtml(peer.host)}:${peer.port}</div><div class="muted">${telemetry}</div><div>${endpoints}</div></article>`;
+    return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><md-text-button data-edit-peer="${escapeHtml(peer.nodeId)}">更新地址</md-text-button></div><div class="muted">${escapeHtml(peer.host)}:8791</div><div class="muted">${telemetry}</div><div>${endpoints}</div></article>`;
   }).join('') : '<div class="empty">尚未配对设备。</div>';
   document.querySelectorAll<HTMLElement>('[data-edit-peer]').forEach(button => button.addEventListener('click', () => openPeerDialog(button.dataset.editPeer!)));
   applyPreferences();
@@ -286,13 +284,10 @@ function renderPeers(): void {
 function openPeerDialog(nodeId: string): void {
   const peer = peers.find(item => item.nodeId === nodeId);
   if (!peer) return;
-  byId<ValueElement>('editAlias').value = peer.alias;
   byId<ValueElement>('editHost').value = peer.host;
-  byId<ValueElement>('editPort').value = String(peer.port);
   byId<HTMLElement & { show: () => void }>('peerDialog').show();
   byId<HTMLElement>('savePeer').onclick = () => void (async () => {
-    await post(`/api/pair/alias?node=${encodeURIComponent(nodeId)}&alias=${encodeURIComponent(value('editAlias'))}`);
-    await post(`/api/pair/endpoint?node=${encodeURIComponent(nodeId)}&host=${encodeURIComponent(value('editHost'))}&port=${encodeURIComponent(value('editPort'))}`);
+    await post(`/api/pair/endpoint?node=${encodeURIComponent(nodeId)}&host=${encodeURIComponent(value('editHost'))}&port=8791`);
     byId<HTMLElement & { close: () => void }>('peerDialog').close();
     await refreshPeers();
   })();
@@ -342,11 +337,11 @@ function wireEvents(): void {
   byId<HTMLElement>('newCode').addEventListener('click', () => void (async () => { byId<ValueElement>('pairCode').value = await request('/api/pair/code'); setStatus('已生成一次性配对代码；十分钟内有效。'); })());
   byId<HTMLElement>('saveProfile').addEventListener('click', () => void (async () => {
     const endpoints = checked('#exposure md-checkbox').map(item => `${item.dataset.direction === 'source' ? 'S' : 'K'}\t${item.dataset.id}\t${item.dataset.name}`).join('\n');
-    await post(`/api/pair/config?alias=${encodeURIComponent(value('localAlias') || 'This computer')}&endpoints=${encodeURIComponent(endpoints)}`);
+    await post(`/api/pair/config?alias=${encodeURIComponent(localAlias)}&endpoints=${encodeURIComponent(endpoints)}`);
     await refreshPeers();
   })());
   byId<HTMLElement>('pairRemote').addEventListener('click', () => void (async () => {
-    const query = new URLSearchParams({ host: value('peerHost'), port: value('peerPort'), alias: value('peerAlias') || value('peerHost'), code: value('peerCode') });
+    const query = new URLSearchParams({ host: value('peerHost'), port: '8791', alias: localAlias, code: value('peerCode') });
     const message = await post(`/api/pair/connect?${query}`);
     if (message.startsWith('Pairing succeeded')) await refreshPeers();
   })());
@@ -361,7 +356,7 @@ async function start(): Promise<void> {
   try {
     devices = JSON.parse(await request('/api/devices')) as Devices;
     const local = JSON.parse(await request('/api/pair/local')) as { alias: string };
-    byId<ValueElement>('localAlias').value = local.alias;
+    localAlias = local.alias;
     renderDeviceControls();
     await Promise.all([refreshPeers(), refreshRoutes()]);
     window.setInterval(() => { void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); }, 5000);
