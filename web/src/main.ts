@@ -54,6 +54,28 @@ function setStatus(message: string, _level: LogLevel = 'INFO'): void {
   void message;
 }
 
+/**
+ * Material Web's dialog scroll container lives in its open Shadow DOM and does
+ * not expose a CSS part or a scrollbar token. Add the same app-local scrollbar
+ * treatment once, without changing the dialog's structure or behavior.
+ */
+function styleDialogScrollbar(dialog: DialogElement): void {
+  const apply = () => {
+    const root = dialog.shadowRoot;
+    if (!root || root.querySelector('[data-oamr-dialog-scrollbar]')) return;
+    const style = document.createElement('style');
+    style.dataset.oamrDialogScrollbar = 'true';
+    style.textContent = `.scroller { scrollbar-color: var(--md-sys-color-primary) var(--md-sys-color-surface-container-highest); scrollbar-width: thin; }
+      .scroller::-webkit-scrollbar { width: 12px; height: 12px; }
+      .scroller::-webkit-scrollbar-track { margin: 5px; border-radius: 999px; background: var(--md-sys-color-surface-container-highest); }
+      .scroller::-webkit-scrollbar-thumb { min-height: 28px; border: 3px solid var(--md-sys-color-surface-container-highest); border-radius: 999px; background: var(--md-sys-color-primary); }
+      .scroller::-webkit-scrollbar-thumb:hover { background: var(--md-sys-color-primary); }`;
+    root.append(style);
+  };
+  if (dialog.shadowRoot) apply();
+  else void customElements.whenDefined('md-dialog').then(apply);
+}
+
 function renderLogs(): void {
   const output = document.querySelector<HTMLElement>('#status');
   if (!output) return;
@@ -163,7 +185,9 @@ function enhancePanels(): void {
       // MdDialog completes its opening sequence asynchronously. Calling its
       // public API (rather than toggling an attribute) keeps focus trapping,
       // Escape handling, and Material's enter/exit animation intact.
-      void byId<DialogElement>('tutorialDialog').show();
+      const dialog = byId<DialogElement>('tutorialDialog');
+      styleDialogScrollbar(dialog);
+      void dialog.show();
     });
     byId<HTMLElement>('closeTutorial').addEventListener('click', () => {
       void byId<DialogElement>('tutorialDialog').close();
