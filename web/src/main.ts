@@ -33,15 +33,22 @@ let deleteConfirmation: number | undefined;
 let selectedRoute: Route | undefined;
 type LogLevel = 'VERBOSE' | 'INFO' | 'WARNING' | 'ERROR';
 const logs: Array<{ level: LogLevel; message: string; time: string }> = [];
+const language = localStorage.getItem('oamr-language') === 'en' ? 'en' : 'zh-CN';
+const theme = localStorage.getItem('oamr-theme') === 'dark' ? 'dark' : 'light';
 
 const escapeHtml = (value: unknown) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]!);
 const byId = <T extends HTMLElement>(id: string) => document.querySelector<T>(`#${id}`)!;
 const value = (id: string) => (byId<ValueElement>(id).value ?? '').trim();
 const checked = (selector: string) => Array.from(document.querySelectorAll<Checkable>(selector)).filter(item => item.checked);
 
-function setStatus(message: string, level: LogLevel = 'INFO'): void {
+function logEvent(message: string, level: LogLevel = 'INFO'): void {
   logs.unshift({ level, message, time: new Date().toLocaleTimeString() });
   renderLogs();
+}
+
+function setStatus(message: string, _level: LogLevel = 'INFO'): void {
+  const notice = document.querySelector<HTMLElement>('#uiNotice');
+  if (notice) notice.textContent = message;
 }
 
 function renderLogs(): void {
@@ -50,7 +57,7 @@ function renderLogs(): void {
   const filter = document.querySelector<ValueElement>('#logLevel')?.value ?? 'INFO';
   const minimum = ['VERBOSE', 'INFO', 'WARNING', 'ERROR'].indexOf(filter);
   output.textContent = logs.filter(item => ['VERBOSE', 'INFO', 'WARNING', 'ERROR'].indexOf(item.level) >= minimum)
-    .map(item => `[${item.time}] ${item.level}: ${item.message}`).join('\n') || '暂无日志。';
+    .map(item => `[${item.time}] ${item.level}: ${item.message}`).join('\n') || 'No log entries.';
 }
 
 async function request(path: string, method = 'GET'): Promise<string> {
@@ -64,11 +71,14 @@ async function post(path: string): Promise<string> {
   try {
     const message = await request(path, 'POST');
     setStatus(message);
+    if (/failed|could not|invalid|error/i.test(message)) logEvent(message, 'ERROR');
+    else if (/route|pair/i.test(path)) logEvent(message, 'INFO');
     await refreshRoutes();
     return message;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setStatus(`操作失败：${message}`, 'ERROR');
+    setStatus(`Operation failed: ${message}`);
+    logEvent(`Operation failed: ${message}`, 'ERROR');
     throw error;
   }
 }
@@ -111,6 +121,18 @@ function renderDeviceControls(): void {
 }
 
 function enhancePanels(): void {
+  const header = document.querySelector<HTMLElement>('.app-header');
+  if (header && !document.querySelector('#uiLanguage')) {
+    const themeLabel = language === 'en' ? (theme === 'dark' ? 'Light' : 'Dark') : (theme === 'dark' ? '浅色' : '深色');
+    const refreshLabel = language === 'en' ? 'Refresh' : '刷新';
+    const controls = document.createElement('div');
+    controls.className = 'header-controls';
+    controls.innerHTML = `<span id="uiNotice" class="ui-notice"></span><md-outlined-select id="uiLanguage" aria-label="Language"><md-select-option value="zh-CN" ${language === 'zh-CN' ? 'selected' : ''}><div slot="headline">中文</div></md-select-option><md-select-option value="en" ${language === 'en' ? 'selected' : ''}><div slot="headline">English</div></md-select-option></md-outlined-select><md-text-button id="themeToggle">${themeLabel}</md-text-button><md-text-button id="refreshPage">${refreshLabel}</md-text-button>`;
+    header.append(controls);
+    byId<HTMLElement>('uiLanguage').addEventListener('change', () => { localStorage.setItem('oamr-language', value('uiLanguage')); window.location.reload(); });
+    byId<HTMLElement>('themeToggle').addEventListener('click', () => { localStorage.setItem('oamr-theme', theme === 'dark' ? 'light' : 'dark'); window.location.reload(); });
+    byId<HTMLElement>('refreshPage').addEventListener('click', () => window.location.reload());
+  }
   const log = byId<HTMLElement>('status');
   const logCard = log.closest('section');
   if (logCard && !document.querySelector('#logLevel')) {
@@ -131,6 +153,47 @@ function enhancePanels(): void {
     save.parentElement?.replaceWith(save);
     details.append(save);
   }
+}
+
+function applyPreferences(): void {
+  document.documentElement.lang = language;
+  document.documentElement.dataset.theme = theme;
+  if (language !== 'en') return;
+  const dictionary: Record<string, string> = {
+    '路由表': 'Route table', '发送到局域网': 'Send to LAN', '从局域网接收': 'Receive from LAN', '音频矩阵': 'Audio matrix', '设备配对': 'Device pairing',
+    '已配对设备与传输遥测': 'Paired devices & telemetry', '运行日志': 'Event log', '停止并清空所有路由': 'Stop and clear all routes',
+    '创建发送路线': 'Create sender route', '创建接收路线': 'Create receiver route', '添加已勾选的路线': 'Add selected routes',
+    '保存开放设备': 'Save exposed devices', '生成新代码': 'Generate code', '开始配对': 'Pair device', '配置': 'Configure', '暂停': 'Pause', '恢复': 'Resume',
+    '删除': 'Delete', '确认删除': 'Confirm delete', '运行中': 'Running', '已暂停': 'Paused', '本地路线': 'Local route', '暂无路线。': 'No routes.',
+    '取消': 'Cancel', '保存': 'Save', '路线配置': 'Route settings', '音质': 'Quality', '最大延迟': 'Maximum latency', '模式': 'Mode',
+    '稳定模式': 'Stable mode', '自动模式': 'Auto mode', '低延迟模式': 'Low-latency mode', '显示级别': 'Minimum level', '暂无日志。': 'No log entries.',
+    '选择要向已配对设备开放的本机端点': 'Choose local endpoints exposed to paired devices',
+    '本机音频矩阵 · 配对设备 · RTP/Opus 局域网传输': 'Local audio matrix · paired devices · RTP/Opus LAN streaming',
+    '仅本机 Web UI': 'Local-only Web UI',
+    '每条路线独立运行。网络路线的音质、最大延迟和模式在这里修改。': 'Each route runs independently. Configure quality, maximum latency, and mode for network routes here.',
+    '为未配对设备手工创建 RTP 发送路线。': 'Create an RTP sender route manually for an unpaired device.',
+    '为未配对设备手工创建 RTP 接收路线。': 'Create an RTP receiver route manually for an unpaired device.',
+    '勾选来源与播放目标的交叉点即可创建路线。本机、已配对设备都会列在这里；网络路线的属性在路由表中设置。': 'Select source-to-target intersections to create routes. Local and paired devices are listed here; configure network routes in the route table.',
+    '网页仅监听本机。配对控制使用 TCP 8791，一次性代码十分钟有效且仅能使用一次。': 'The web UI listens locally only. Pairing control uses TCP 8791; one-time codes expire after ten minutes and work once.',
+    '允许已配对设备看到的本机端点': 'Local endpoints visible to paired devices',
+    '保存开放设备、修改别名、启动或停止网络流后会同步；此处每五秒自动刷新。': 'Changes to exposed devices, aliases, and network streams are synchronized. This list refreshes every five seconds.',
+    '音频来源': 'Audio source', 'IP / 主机名': 'IP / host name', 'UDP 端口': 'UDP port', '播放到': 'Play to',
+    '本机别名': 'Local alias', '配对控制端口': 'Pairing control port', '一次性配对代码': 'One-time pairing code',
+    '另一台设备的 IP / 主机名': 'Other device IP / host name', 'TCP 端口': 'TCP port', '别名': 'Alias', '对方的一次性代码': 'Peer one-time code',
+    '来源 \\ 播放目标': 'Source \\ playback target', '暂不支持': 'Not supported', '禁用': 'Disabled', '当前没有传输音频': 'No active audio stream',
+    '对方未开放设备': 'The peer exposes no devices', '尚未配对设备。': 'No paired devices.', '来源': 'Source', '输出': 'Output', '编辑': 'Edit',
+    '传输属性': 'Transport properties', '路线': 'Route', '状态': 'Status', '操作': 'Actions', '低': 'Low', '中': 'Medium', '高': 'High'
+  };
+  const translate = (input: string) => dictionary[input.trim()] ?? input;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = []; let node: Node | null;
+  while ((node = walker.nextNode())) nodes.push(node as Text);
+  nodes.forEach(item => { const replacement = translate(item.data); if (replacement !== item.data) item.data = replacement; });
+  document.querySelectorAll<HTMLElement>('[label],[placeholder]').forEach(element => {
+    for (const attribute of ['label', 'placeholder']) {
+      const current = element.getAttribute(attribute); if (current) element.setAttribute(attribute, translate(current));
+    }
+  });
 }
 
 function remoteDevices(direction: Direction): RemoteDevice[] {
@@ -158,21 +221,7 @@ function renderMatrix(): void {
   }).join('');
   byId<HTMLElement>('matrix').innerHTML = `<table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${'remote' in sink ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
   document.querySelectorAll<HTMLElement>('#matrix md-checkbox').forEach(item => item.addEventListener('change', () => { matrixDirty = true; }));
-}
-
-function profileSelect(id: string, current: string | number | undefined, options: Array<[string, string]>): string {
-  return `<md-outlined-select id="${id}" class="route-property">${options.map(([key, label]) => `<md-select-option value="${key}" ${String(current) === key ? 'selected' : ''}><div slot="headline">${label}</div></md-select-option>`).join('')}</md-outlined-select>`;
-}
-
-function renderRoutesLegacy(routes: Route[]): void {
-  const content = routes.length ? `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>路线</th><th>状态</th><th>网络属性</th><th>操作</th></tr></thead><tbody>${routes.map(route => `<tr><td>${escapeHtml(route.label)}</td><td>${route.enabled ? '运行中' : '已暂停'}</td><td>${route.network ? `<div class="route-actions">${profileSelect(`quality-${route.id}`, route.quality, [['low', '低音质'], ['medium', '中音质'], ['high', '高音质']])}${profileSelect(`latency-${route.id}`, route.latency, [['40', '40 ms'], ['60', '60 ms'], ['100', '100 ms'], ['150', '150 ms']])}${profileSelect(`mode-${route.id}`, route.mode, [['stable', '稳定'], ['auto', '自动'], ['low-latency', '低延迟']])}<md-text-button data-profile="${route.id}">应用</md-text-button></div>` : '本地路线'}</td><td><div class="route-actions"><md-text-button data-toggle="${route.id}" data-enabled="${!route.enabled}">${route.enabled ? '暂停' : '恢复'}</md-text-button><md-text-button data-delete="${route.id}">删除</md-text-button></div></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">暂无路线。</div>';
-  byId<HTMLElement>('routeTable').innerHTML = content;
-  document.querySelectorAll<HTMLElement>('[data-toggle]').forEach(button => button.addEventListener('click', () => void post(`/api/routes/${button.dataset.toggle}/toggle?enabled=${button.dataset.enabled}`)));
-  document.querySelectorAll<HTMLElement>('[data-delete]').forEach(button => button.addEventListener('click', () => void post(`/api/routes/${button.dataset.delete}/delete`)));
-  document.querySelectorAll<HTMLElement>('[data-profile]').forEach(button => button.addEventListener('click', () => {
-    const id = button.dataset.profile!;
-    void post(`/api/routes/${id}/profile?quality=${encodeURIComponent(value(`quality-${id}`))}&max-latency-ms=${encodeURIComponent(value(`latency-${id}`))}&mode=${encodeURIComponent(value(`mode-${id}`))}`);
-  }));
+  applyPreferences();
 }
 
 function renderRoutes(routes: Route[]): void {
@@ -191,6 +240,7 @@ function renderRoutes(routes: Route[]): void {
     deleteConfirmation = undefined;
     void post(`/api/routes/${id}/delete`);
   }));
+  applyPreferences();
 }
 
 function openRouteDialog(route: Route): void {
@@ -221,6 +271,7 @@ function renderPeers(): void {
     return `<article class="peer-card"><div class="peer-title"><strong>${escapeHtml(peer.alias)}</strong><md-text-button data-edit-peer="${escapeHtml(peer.nodeId)}">编辑</md-text-button></div><div class="muted">${escapeHtml(peer.host)}:${peer.port}</div><div class="muted">${telemetry}</div><div>${endpoints}</div></article>`;
   }).join('') : '<div class="empty">尚未配对设备。</div>';
   document.querySelectorAll<HTMLElement>('[data-edit-peer]').forEach(button => button.addEventListener('click', () => openPeerDialog(button.dataset.editPeer!)));
+  applyPreferences();
 }
 
 function openPeerDialog(nodeId: string): void {
@@ -297,6 +348,7 @@ async function start(): Promise<void> {
   renderShell();
   wireEvents();
   enhancePanels();
+  applyPreferences();
   try {
     devices = JSON.parse(await request('/api/devices')) as Devices;
     const local = JSON.parse(await request('/api/pair/local')) as { alias: string };
@@ -304,9 +356,12 @@ async function start(): Promise<void> {
     renderDeviceControls();
     await Promise.all([refreshPeers(), refreshRoutes()]);
     setStatus('设备已就绪。');
+    logEvent('Application ready.', 'INFO');
     window.setInterval(() => { void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); }, 5000);
   } catch (error) {
-    setStatus(`加载失败：${error instanceof Error ? error.message : String(error)}`);
+    const message = error instanceof Error ? error.message : String(error);
+    setStatus(`加载失败：${message}`);
+    logEvent(`Startup failed: ${message}`, 'ERROR');
   }
 }
 
