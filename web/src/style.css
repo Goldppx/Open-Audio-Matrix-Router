@@ -62,7 +62,9 @@ button, input, select { font: inherit; }
 md-filled-button, md-outlined-button, md-text-button, md-icon-button { transition: transform var(--oamr-motion) var(--oamr-ease); }
 @media (hover: hover) and (pointer: fine) { md-filled-button:hover, md-outlined-button:hover, md-text-button:hover, md-icon-button:hover { transform: translateY(-1px); } }
 md-outlined-text-field, md-filled-select { width: 100%; }
-md-outlined-select { width: 100%; }
+md-outlined-select { width: 100%; min-width: 0; max-width: 100%; overflow: hidden; }
+md-outlined-select md-select-option { min-width: 0; max-width: 100%; }
+md-outlined-select md-select-option [slot="headline"] { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 md-divider { margin: var(--oamr-space-4) 0; }
 
 .data-table-wrap { overflow: auto; border: 1px solid var(--md-sys-color-outline); border-radius: var(--oamr-radius-md); background: var(--md-sys-color-surface-container-low); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--md-sys-color-shadow) 10%, transparent); scrollbar-color: var(--md-sys-color-primary) var(--md-sys-color-surface-container-highest); scrollbar-width: thin; scrollbar-gutter: stable; }
@@ -90,7 +92,8 @@ md-divider { margin: var(--oamr-space-4) 0; }
 .matrix-help { margin: 0; color: var(--md-sys-color-on-surface-variant); line-height: 1.45; }
 .matrix-target-heading { margin-block-start: var(--oamr-space-1); color: var(--md-sys-color-on-surface-variant); font-size: .85rem; font-weight: 600; }
 .matrix-targets { display: grid; gap: var(--oamr-space-2); }
-.matrix-target { display: grid; grid-template-columns: var(--oamr-touch-target) minmax(0, 1fr) auto; align-items: center; min-block-size: var(--oamr-touch-target); padding: var(--oamr-space-1) var(--oamr-space-3) var(--oamr-space-1) var(--oamr-space-1); border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--oamr-radius-md); background: var(--md-sys-color-surface-container-low); cursor: pointer; transition: background var(--oamr-motion) var(--oamr-ease), border-color var(--oamr-motion) var(--oamr-ease); }
+.matrix-target { display: grid; grid-template-columns: var(--oamr-touch-target) minmax(0, 1fr) auto; align-items: center; column-gap: var(--oamr-space-2); min-block-size: var(--oamr-touch-target); padding: var(--oamr-space-2) var(--oamr-space-3); border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--oamr-radius-md); background: var(--md-sys-color-surface-container-low); cursor: pointer; transition: background var(--oamr-motion) var(--oamr-ease), border-color var(--oamr-motion) var(--oamr-ease); }
+.matrix-target md-checkbox { justify-self: center; --md-checkbox-state-layer-size: 40px; }
 .matrix-target:hover { border-color: var(--md-sys-color-primary); background: var(--md-sys-color-surface-container-high); }
 .matrix-target.disabled { cursor: default; opacity: .58; }
 .matrix-target-name { min-width: 0; overflow-wrap: anywhere; }
@@ -179,7 +182,7 @@ md-divider { margin: var(--oamr-space-4) 0; }
   .matrix-toolbar { justify-content: stretch; }
   .matrix-toolbar button { flex: 1; min-block-size: var(--oamr-touch-target); }
   .matrix-builder { padding-inline: var(--oamr-space-1); }
-  .matrix-target { padding-inline-end: var(--oamr-space-2); }
+  .matrix-target { padding-inline: var(--oamr-space-2); }
 }
 
 @media (min-width: 720px) and (max-width: 1000px) {
