@@ -1,4 +1,5 @@
 #include "oamr/pairing/pairing_service.hpp"
+#include "oamr/diagnostics/log.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -21,10 +22,12 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/system/system_error.hpp>
 
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #else
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -84,6 +87,46 @@ std::vector<IPv4Interface> active_ipv4_interfaces(Socket socket) {
     freeifaddrs(first);
 #endif
     return result;
+}
+
+std::string ipv4_text(in_addr address) {
+    char buffer[INET_ADDRSTRLEN]{};
+    return inet_ntop(AF_INET, &address, buffer, sizeof(buffer)) ? buffer : "unknown";
+}
+
+std::string native_error_to_utf8(std::string_view message) {
+#ifdef _WIN32
+    if (message.empty()) return {};
+    const int wide_size = MultiByteToWideChar(CP_ACP, 0, message.data(), static_cast<int>(message.size()), nullptr, 0);
+    if (wide_size <= 0) return std::string{message};
+    std::wstring wide(static_cast<std::size_t>(wide_size), L'\0');
+    MultiByteToWideChar(CP_ACP, 0, message.data(), static_cast<int>(message.size()), wide.data(), wide_size);
+    const int utf8_size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, nullptr, 0, nullptr, nullptr);
+    if (utf8_size <= 0) return std::string{message};
+    std::string utf8(static_cast<std::size_t>(utf8_size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, utf8.data(), utf8_size, nullptr, nullptr);
+    return utf8;
+#else
+    return std::string{message};
+#endif
+}
+
+std::string socket_error_message(const boost::system::error_code& error) {
+#ifdef _WIN32
+    switch (error.value()) {
+        case WSAEACCES: return "Socket access was denied.";
+        case WSAEADDRINUSE: return "The network address or port is already in use.";
+        case WSAECONNABORTED: return "The connection was aborted.";
+        case WSAECONNREFUSED: return "Connection refused by the remote host.";
+        case WSAECONNRESET: return "The connection was reset by the remote host.";
+        case WSAEHOSTUNREACH: return "The remote host is unreachable.";
+        case WSAENETUNREACH: return "The destination network is unreachable.";
+        case WSAETIMEDOUT: return "The network operation timed out.";
+        default: return "Windows socket operation failed.";
+    }
+#else
+    return error.message();
+#endif
 }
 
 std::string env_or(const char* name, const char* fallback) {
@@ -178,8 +221,10 @@ HttpReply post_control(const std::string& host, std::uint16_t port, const std::s
         if (response.result_int() < 200 || response.result_int() >= 300)
             return {false, response.body(), "Remote control returned HTTP " + std::to_string(response.result_int()) + "."};
         return {true, response.body(), {}};
+    } catch (const boost::system::system_error& error) {
+        return {false, {}, socket_error_message(error.code()) + " (socket error " + std::to_string(error.code().value()) + ")"};
     } catch (const std::exception& error) {
-        return {false, {}, error.what()};
+        return {false, {}, native_error_to_utf8(error.what())};
     }
 }
 }
@@ -273,7 +318,12 @@ public:
             if (port == 0 || port > 65535) continue;
             char host[INET_ADDRSTRLEN]{}; inet_ntop(AF_INET, &sender.sin_addr, host, sizeof(host));
             std::lock_guard lock(mutex);
-            if (node->second != node_id) discovered[node->second] = {{node->second, remote_alias->second, host, static_cast<std::uint16_t>(port)}, std::chrono::steady_clock::now()};
+            if (node->second != node_id) {
+                const auto existing = discovered.find(node->second);
+                const bool changed = existing == discovered.end() || existing->second.peer.host != host || existing->second.peer.port != port;
+                discovered[node->second] = {{node->second, remote_alias->second, host, static_cast<std::uint16_t>(port)}, std::chrono::steady_clock::now()};
+                if (changed) diagnostics::write(diagnostics::Level::Info, "Discovered LAN device " + remote_alias->second + " at " + host + ":" + std::to_string(port) + ".");
+            }
         }
     }
 
@@ -286,6 +336,12 @@ public:
         sockaddr_in address{}; address.sin_family = AF_INET; address.sin_port = htons(kDiscoveryPort); address.sin_addr.s_addr = htonl(INADDR_ANY);
         if (bind(discovery_socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) { error = "Could not bind discovery port."; close_socket(discovery_socket); discovery_socket = kInvalidSocket; return false; }
         discovery_interfaces = active_ipv4_interfaces(discovery_socket);
+        std::string interface_list;
+        for (const auto& interface : discovery_interfaces) {
+            if (!interface_list.empty()) interface_list += ", ";
+            interface_list += ipv4_text(interface.address);
+        }
+        diagnostics::write(diagnostics::Level::Verbose, "LAN discovery interfaces: " + (interface_list.empty() ? std::string{"automatic"} : interface_list) + ".");
         in_addr group{}; inet_pton(AF_INET, kDiscoveryGroup, &group);
         std::size_t joined{};
         for (const auto& interface : discovery_interfaces) {
@@ -304,6 +360,7 @@ public:
             discovery_interfaces.push_back({any, any});
         }
         unsigned char ttl = 1; setsockopt(discovery_socket, IPPROTO_IP, IP_MULTICAST_TTL, reinterpret_cast<const char*>(&ttl), sizeof(ttl));
+        diagnostics::write(diagnostics::Level::Verbose, "LAN discovery socket joined " + std::to_string(joined == 0 ? 1 : joined) + " multicast interface(s) on UDP 8792; directed broadcast fallback is active.");
         discovery_stopping = false; discovery_worker = std::thread([this] { discovery_loop(); }); return true;
     }
 
@@ -339,12 +396,13 @@ public:
         const auto code = query.find("code"), node = query.find("node"), peer_alias = query.find("alias"), peer_port = query.find("port");
         if (code == query.end() || node == query.end() || peer_alias == query.end() || peer_port == query.end()) return "error=invalid-request";
         std::lock_guard lock(mutex);
-        if (pair_code.empty() || std::chrono::steady_clock::now() > code_expiry || code->second != pair_code) return "error=invalid-or-expired-code";
+        if (pair_code.empty() || std::chrono::steady_clock::now() > code_expiry || code->second != pair_code) { diagnostics::write(diagnostics::Level::Warning, "Rejected pairing request from " + host + ": invalid or expired code."); return "error=invalid-or-expired-code"; }
         unsigned port{}; try { port = static_cast<unsigned>(std::stoul(peer_port->second)); } catch (...) { return "error=invalid-port"; }
         if (port == 0 || port > 65535) return "error=invalid-port";
         pair_code.clear();
         known_peers[node->second] = {node->second, peer_alias->second, host, static_cast<std::uint16_t>(port), {}};
         save_unlocked();
+        diagnostics::write(diagnostics::Level::Info, "Accepted pairing request from " + peer_alias->second + " at " + host + ":" + std::to_string(port) + ".");
         return "node=" + escape(node_id) + "&alias=" + escape(alias) + "&catalog=" + escape(serialize(exposed));
     }
 
@@ -373,7 +431,11 @@ bool PairingService::start(std::uint16_t port) {
     sockaddr_in address{}; address.sin_family = AF_INET; address.sin_port = htons(port); address.sin_addr.s_addr = htonl(INADDR_ANY);
     if (bind(impl_->listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || listen(impl_->listener, 8) != 0) { impl_->error = "Could not bind pairing port."; close_socket(impl_->listener); impl_->listener = kInvalidSocket; return false; }
     impl_->listen_port = port; impl_->stopping = false; impl_->worker = std::thread([this] { impl_->serve(); });
-    if (impl_->discovery_enabled && !impl_->start_discovery()) impl_->discovery_enabled = false;
+    diagnostics::write(diagnostics::Level::Verbose, "Pairing control listening on TCP " + std::to_string(port) + ".");
+    if (impl_->discovery_enabled && !impl_->start_discovery()) {
+        diagnostics::write(diagnostics::Level::Error, "Could not restore LAN discovery: " + impl_->error);
+        impl_->discovery_enabled = false;
+    }
     return true;
 }
 void PairingService::stop() noexcept { impl_->stop_discovery(); impl_->stopping = true; if (impl_->listener != kInvalidSocket) { close_socket(impl_->listener); impl_->listener = kInvalidSocket; } if (impl_->worker.joinable()) impl_->worker.join(); }
@@ -404,7 +466,10 @@ std::vector<DiscoveredPeer> PairingService::discovered_peers() const {
     const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(7);
     std::lock_guard lock(impl_->mutex); std::vector<DiscoveredPeer> result;
     for (auto it = impl_->discovered.begin(); it != impl_->discovered.end();) {
-        if (it->second.seen < cutoff) it = impl_->discovered.erase(it);
+        if (it->second.seen < cutoff) {
+            diagnostics::write(diagnostics::Level::Verbose, "LAN device expired from discovery cache: " + it->second.peer.alias + " (" + it->second.peer.host + ").");
+            it = impl_->discovered.erase(it);
+        }
         else { result.push_back(it->second.peer); ++it; }
     }
     return result;

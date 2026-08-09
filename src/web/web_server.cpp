@@ -2,6 +2,7 @@
 
 #include "oamr/audio/audio_backend.hpp"
 #include "oamr/audio/backend_factory.hpp"
+#include "oamr/diagnostics/log.hpp"
 #include "oamr/pairing/pairing_service.hpp"
 
 #include <algorithm>
@@ -210,17 +211,19 @@ public:
     }
 
     bool add_route(std::string label, RouteSettings settings) {
-        if (!backend) { error = "No audio backend is available."; return false; }
+        if (!backend) { error = "No audio backend is available."; diagnostics::write(diagnostics::Level::Error, error); return false; }
         auto route = start_route(settings);
-        if (!route) { error = backend->last_error(); return false; }
+        if (!route) { error = backend->last_error(); diagnostics::write(diagnostics::Level::Error, "Could not start local route: " + error); return false; }
+        diagnostics::write(diagnostics::Level::Info, "Started route: " + label);
         routes.push_back({next_route_id++, std::move(label), true, std::move(settings), std::nullopt, std::move(route)});
         return true;
     }
 
     bool add_network_route(std::string label, const audio::NetworkProfile& profile, RouteSettings settings) {
-        if (!backend) { error = "No audio backend is available."; return false; }
+        if (!backend) { error = "No audio backend is available."; diagnostics::write(diagnostics::Level::Error, error); return false; }
         auto route = start_route(settings);
-        if (!route) { error = backend->last_error(); return false; }
+        if (!route) { error = backend->last_error(); diagnostics::write(diagnostics::Level::Error, "Could not start network route: " + error); return false; }
+        diagnostics::write(diagnostics::Level::Info, "Started network route: " + label + " [" + quality_name(profile.quality) + ", " + std::to_string(profile.max_latency_ms) + " ms, " + mode_name(profile.mode) + "]");
         routes.push_back({next_route_id++, std::move(label), true, std::move(settings), profile, std::move(route)});
         return true;
     }
@@ -230,14 +233,17 @@ public:
             if (item.id != id) continue;
             if (enable && !item.enabled) {
                 auto route = start_route(item.settings);
-                if (!route) { error = backend ? backend->last_error() : "No audio backend is available."; return false; }
+                if (!route) { error = backend ? backend->last_error() : "No audio backend is available."; diagnostics::write(diagnostics::Level::Error, "Could not resume route " + std::to_string(id) + ": " + error); return false; }
                 item.route = std::move(route);
             } else if (!enable && item.enabled && item.route) {
                 item.route->stop();
             }
             item.enabled = enable;
+            diagnostics::write(diagnostics::Level::Info, std::string(enable ? "Resumed route: " : "Paused route: ") + item.label);
             return true;
         }
+        error = "Route " + std::to_string(id) + " was not found.";
+        diagnostics::write(diagnostics::Level::Warning, error);
         return false;
     }
 
@@ -256,11 +262,15 @@ public:
             if (!route) {
                 error = backend ? backend->last_error() : "No audio backend is available.";
                 item.enabled = false;
+                diagnostics::write(diagnostics::Level::Error, "Could not restart route after profile update: " + error);
                 return false;
             }
             item.route = std::move(route);
+            diagnostics::write(diagnostics::Level::Info, "Updated network profile for route: " + item.label);
             return true;
         }
+        error = "Network route " + std::to_string(id) + " was not found.";
+        diagnostics::write(diagnostics::Level::Warning, error);
         return false;
     }
 
@@ -269,12 +279,16 @@ public:
         routes.erase(std::remove_if(routes.begin(), routes.end(), [id](ActiveRoute& item) {
             if (item.id != id) return false;
             if (item.route) item.route->stop();
+            diagnostics::write(diagnostics::Level::Info, "Deleted route: " + item.label);
             return true;
         }), routes.end());
-        return routes.size() != old_size;
+        if (routes.size() != old_size) return true;
+        diagnostics::write(diagnostics::Level::Warning, "Could not delete route " + std::to_string(id) + ": route not found.");
+        return false;
     }
 
     void stop_all_routes() {
+        if (!routes.empty()) diagnostics::write(diagnostics::Level::Info, "Stopped and cleared " + std::to_string(routes.size()) + " route(s).");
         for (auto& item : routes) if (item.route) item.route->stop();
         routes.clear();
     }
@@ -283,6 +297,7 @@ public:
         for (auto& item : routes) {
             if (item.enabled && item.route && !item.route->poll()) {
                 error = item.route->last_error();
+                diagnostics::write(diagnostics::Level::Error, "Route stopped after a runtime failure [" + item.label + "]: " + error);
                 item.route->stop();
                 item.enabled = false;
             }
@@ -310,7 +325,7 @@ public:
         std::unordered_map<std::string, std::string> values{{"quality", request.quality},
                                                             {"mode", request.mode},
                                                             {"max-latency-ms", std::to_string(request.max_latency_ms)}};
-        if (!network_profile_from(values, profile)) { route_error = "Invalid remote network profile."; return false; }
+        if (!network_profile_from(values, profile)) { route_error = "Invalid remote network profile."; diagnostics::write(diagnostics::Level::Warning, "Rejected remote route with an invalid network profile."); return false; }
         if (request.kind == pairing::RemoteRouteKind::Send) {
             audio::SenderSettings settings;
             settings.host = request.host;
@@ -333,6 +348,7 @@ public:
         std::ostringstream json;
         const auto sources = backend ? backend->list_sources() : std::vector<audio::DeviceInfo>{};
         const auto sinks = backend ? backend->list_sinks() : std::vector<audio::DeviceInfo>{};
+        diagnostics::write(diagnostics::Level::Verbose, "Enumerated " + std::to_string(sources.size()) + " audio source(s) and " + std::to_string(sinks.size()) + " audio sink(s).");
         json << "{\"sources\":[";
         bool first = true;
         for (const auto& device : sources) {
@@ -372,6 +388,24 @@ public:
                 return std::string{kMissingWebAssetsPage};
             }
         }
+        if (method == "GET" && target.rfind("/api/logs", 0) == 0) {
+            type = "application/json; charset=utf-8";
+            std::uint64_t after{};
+            const auto query = query_params(target);
+            if (const auto value = query.find("after"); value != query.end()) {
+                const auto [pointer, parse_error] = std::from_chars(value->second.data(), value->second.data() + value->second.size(), after);
+                if (parse_error != std::errc{} || pointer != value->second.data() + value->second.size()) after = 0;
+            }
+            std::ostringstream out; out << '['; bool first = true;
+            for (const auto& entry : diagnostics::entries_after(after)) {
+                if (!first) out << ','; first = false;
+                const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(entry.timestamp.time_since_epoch()).count();
+                out << "{\"sequence\":" << entry.sequence << ",\"timestamp\":" << timestamp
+                    << ",\"level\":\"" << diagnostics::level_name(entry.level) << "\",\"message\":\""
+                    << json_escape(entry.message) << "\"}";
+            }
+            return out << ']', out.str();
+        }
         if (method == "GET" && target.rfind("/api/devices", 0) == 0) { type = "application/json; charset=utf-8"; return devices_json(); }
         if (method == "GET" && target.rfind("/api/routes", 0) == 0) {
             type = "application/json; charset=utf-8"; std::ostringstream out; out << '['; bool first = true;
@@ -403,34 +437,42 @@ public:
                     exposed.push_back({id, name, row[0] == 'S' ? pairing::EndpointDirection::Source : pairing::EndpointDirection::Sink});
                 }
             }
-            pairing.set_exposed_endpoints(std::move(exposed)); pairing.announce(); return "Pairing profile saved and synchronized.";
+            const auto endpoint_count = exposed.size();
+            pairing.set_exposed_endpoints(std::move(exposed)); pairing.announce();
+            diagnostics::write(diagnostics::Level::Info, "Saved pairing profile with " + std::to_string(endpoint_count) + " exposed endpoint(s).");
+            return "Pairing profile saved and synchronized.";
         }
         if (method == "POST" && target.rfind("/api/discovery", 0) == 0) {
             const auto query = query_params(target); const auto enabled = query.find("enabled");
             if (enabled == query.end()) return "Missing discovery state.";
             if (enabled->second != "true" && enabled->second != "false") return "Invalid discovery state.";
-            if (!pairing.set_discovery_enabled(enabled->second == "true")) return "Could not enable LAN discovery: " + pairing.last_error();
+            if (!pairing.set_discovery_enabled(enabled->second == "true")) { const auto message = "Could not change LAN discovery state: " + pairing.last_error(); diagnostics::write(diagnostics::Level::Error, message); return message; }
+            diagnostics::write(diagnostics::Level::Info, enabled->second == "true" ? "LAN discovery enabled." : "LAN discovery disabled.");
             return enabled->second == "true" ? "LAN discovery enabled." : "LAN discovery disabled.";
         }
         if (method == "POST" && target.rfind("/api/pair/connect", 0) == 0) {
             const auto query = query_params(target); const auto host = query.find("host"), port = query.find("port"), alias = query.find("alias"), code = query.find("code"); std::uint16_t pairing_port{};
             if (host == query.end() || port == query.end() || alias == query.end() || code == query.end() || !parse_udp_port(port->second, pairing_port)) return "Invalid pairing request.";
-            if (pairing.pair_remote(host->second, pairing_port, alias->second, code->second)) return "Pairing succeeded.";
-            return "Pairing failed: " + pairing.last_error();
+            if (pairing.pair_remote(host->second, pairing_port, alias->second, code->second)) { diagnostics::write(diagnostics::Level::Info, "Paired with " + host->second + ":" + std::to_string(pairing_port) + "."); return "Pairing succeeded."; }
+            const auto message = "Pairing failed for " + host->second + ":" + std::to_string(pairing_port) + ": " + pairing.last_error();
+            diagnostics::write(diagnostics::Level::Error, message); return "Pairing failed: " + pairing.last_error();
         }
         if (method == "POST" && target.rfind("/api/pair/alias", 0) == 0) {
             const auto query = query_params(target); const auto node = query.find("node"), alias = query.find("alias");
-            if (node == query.end() || alias == query.end() || !pairing.set_peer_alias(node->second, alias->second)) return "Could not rename paired device.";
+            if (node == query.end() || alias == query.end() || !pairing.set_peer_alias(node->second, alias->second)) { diagnostics::write(diagnostics::Level::Warning, "Could not rename paired device: invalid or unknown node."); return "Could not rename paired device."; }
+            diagnostics::write(diagnostics::Level::Info, "Renamed paired device to " + alias->second + ".");
             return "Paired device alias saved.";
         }
         if (method == "POST" && target.rfind("/api/pair/endpoint", 0) == 0) {
             const auto query = query_params(target); const auto node = query.find("node"), host = query.find("host"), port = query.find("port"); std::uint16_t pairing_port{};
-            if (node == query.end() || host == query.end() || port == query.end() || !parse_udp_port(port->second, pairing_port) || !pairing.set_peer_endpoint(node->second, host->second, pairing_port)) return "Could not update paired address.";
+            if (node == query.end() || host == query.end() || port == query.end() || !parse_udp_port(port->second, pairing_port) || !pairing.set_peer_endpoint(node->second, host->second, pairing_port)) { diagnostics::write(diagnostics::Level::Warning, "Could not update paired address: invalid endpoint or unknown node."); return "Could not update paired address."; }
+            diagnostics::write(diagnostics::Level::Info, "Updated paired device address to " + host->second + ":" + std::to_string(pairing_port) + ".");
             return "Paired address saved.";
         }
         if (method == "POST" && target.rfind("/api/pair/delete", 0) == 0) {
             const auto query = query_params(target); const auto node = query.find("node");
-            if (node == query.end() || !pairing.remove_peer(node->second)) return "Could not remove paired device.";
+            if (node == query.end() || !pairing.remove_peer(node->second)) { diagnostics::write(diagnostics::Level::Warning, "Could not remove paired device: unknown node."); return "Could not remove paired device."; }
+            diagnostics::write(diagnostics::Level::Info, "Removed paired device " + node->second + ".");
             return "Paired device removed.";
         }
         if (method == "POST" && target.rfind("/api/paired/route", 0) == 0) {
@@ -522,18 +564,19 @@ WebServer::WebServer() : impl_(std::make_unique<Impl>()) {
 WebServer::~WebServer() { stop(); }
 
 bool WebServer::serve(std::uint16_t port) {
-    if (!impl_->backend) { impl_->error = "No audio backend is available."; return false; }
+    if (!impl_->backend) { impl_->error = "No audio backend is available."; diagnostics::write(diagnostics::Level::Error, impl_->error); return false; }
 #ifdef _WIN32
     WSADATA data{};
-    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) { impl_->error = "Windows sockets could not start."; return false; }
+    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) { impl_->error = "Windows sockets could not start."; diagnostics::write(diagnostics::Level::Error, impl_->error); return false; }
 #endif
-    if (!impl_->pairing.start(8791)) { impl_->error = "Could not start pairing service: " + impl_->pairing.last_error(); return false; }
+    if (!impl_->pairing.start(8791)) { impl_->error = "Could not start pairing service: " + impl_->pairing.last_error(); diagnostics::write(diagnostics::Level::Error, impl_->error); return false; }
     Socket listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listener == kInvalidSocket) { impl_->error = "Could not create HTTP socket."; return false; }
+    if (listener == kInvalidSocket) { impl_->error = "Could not create HTTP socket."; diagnostics::write(diagnostics::Level::Error, impl_->error); return false; }
     sockaddr_in address{}; address.sin_family = AF_INET; address.sin_port = htons(port); address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || listen(listener, 8) != 0) {
-        impl_->error = "Could not bind 127.0.0.1:" + std::to_string(port) + "."; close_socket(listener); impl_->pairing.stop(); return false;
+        impl_->error = "Could not bind 127.0.0.1:" + std::to_string(port) + "."; diagnostics::write(diagnostics::Level::Error, impl_->error); close_socket(listener); impl_->pairing.stop(); return false;
     }
+    diagnostics::write(diagnostics::Level::Info, "OAMR Web UI listening on 127.0.0.1:" + std::to_string(port) + ".");
     std::cout << "OAMR Web UI: http://127.0.0.1:" << port << "\nPress Ctrl+C to stop.\n";
     while (!impl_->stopping) {
         fd_set set; FD_ZERO(&set); FD_SET(listener, &set); timeval timeout{0, 200000};
@@ -551,6 +594,7 @@ bool WebServer::serve(std::uint16_t port) {
     }
     close_socket(listener);
     impl_->pairing.stop();
+    diagnostics::write(diagnostics::Level::Info, "OAMR Web UI stopped.");
 #ifdef _WIN32
     WSACleanup();
 #endif

@@ -41,6 +41,8 @@ let selectedRoute: Route | undefined;
 let localAlias = 'This computer';
 type LogLevel = 'VERBOSE' | 'INFO' | 'WARNING' | 'ERROR';
 const logs: Array<{ level: LogLevel; message: string; time: string }> = [];
+type ServerLogEntry = { sequence: number; timestamp: number; level: LogLevel; message: string };
+let lastServerLogSequence = 0;
 const language = localStorage.getItem('oamr-language') === 'en' ? 'en' : 'zh-CN';
 const theme = localStorage.getItem('oamr-theme') === 'dark' ? 'dark' : 'light';
 
@@ -61,9 +63,20 @@ const icons = {
   pair: 'M10.59 13.41 9.17 12l2.83-2.83 2.83 2.83-1.42 1.41L12 12l-1.41 1.41ZM7.05 16.95a5 5 0 0 1 0-7.07l2.12 2.12a2 2 0 0 0 0 2.83l-2.12 2.12ZM16.95 7.05a5 5 0 0 1 0 7.07l-2.12-2.12a2 2 0 0 0 0-2.83l2.12-2.12Z'
 };
 
-function logEvent(message: string, level: LogLevel = 'INFO'): void {
-  logs.unshift({ level, message, time: new Date().toLocaleTimeString() });
+function logEvent(message: string, level: LogLevel = 'INFO', timestamp = new Date()): void {
+  const time = timestamp.toLocaleTimeString();
+  if (logs[0]?.level === level && logs[0]?.message === message && logs[0]?.time === time) return;
+  logs.unshift({ level, message, time });
+  if (logs.length > 500) logs.length = 500;
   renderLogs();
+}
+
+async function refreshServerLogs(): Promise<void> {
+  const entries = JSON.parse(await request(`/api/logs?after=${lastServerLogSequence}`)) as ServerLogEntry[];
+  for (const entry of entries) {
+    lastServerLogSequence = Math.max(lastServerLogSequence, entry.sequence);
+    logEvent(entry.message, entry.level, new Date(entry.timestamp));
+  }
 }
 
 /**
@@ -114,8 +127,8 @@ async function post(path: string): Promise<string> {
   try {
     const message = await request(path, 'POST');
     if (/failed|could not|invalid|error/i.test(message)) logEvent(message, 'ERROR');
-    else if (/route|pair/i.test(path)) logEvent(message, 'INFO');
     await refreshRoutes();
+    await refreshServerLogs();
     return message;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -520,13 +533,14 @@ async function start(): Promise<void> {
   enhancePanels();
   applyPreferences();
   void refreshPairCode().catch(error => logEvent(`Could not load pairing code: ${String(error)}`, 'ERROR'));
+  void refreshServerLogs().catch(error => logEvent(`Could not load diagnostics: ${String(error)}`, 'ERROR'));
   try {
     devices = JSON.parse(await request('/api/devices')) as Devices;
     const local = JSON.parse(await request('/api/pair/local')) as { alias: string };
     localAlias = local.alias;
     renderDeviceControls();
     await Promise.all([refreshPeers(), refreshRoutes(), refreshDiscovery()]);
-    window.setInterval(() => { void refreshPairCode().catch(() => undefined); void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); void refreshDiscovery().catch(() => undefined); }, 3000);
+    window.setInterval(() => { void refreshPairCode().catch(() => undefined); void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); void refreshDiscovery().catch(() => undefined); void refreshServerLogs().catch(() => undefined); }, 3000);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logEvent(`Startup failed: ${message}`, 'ERROR');

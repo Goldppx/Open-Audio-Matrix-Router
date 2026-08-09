@@ -17,16 +17,18 @@ kept as a build target through the GStreamer backend abstraction.
   loss field.
 - Local Material Design 3 Web UI at `127.0.0.1`; only the pairing control
   channel binds to the LAN on TCP 8791.
+- Incremental, level-filtered diagnostics for routes, GStreamer failures,
+  pairing, device enumeration and multi-adapter LAN discovery.
 - Portable Windows ZIP containing the private GStreamer subset and MSVC
   runtime—no system-wide GStreamer or VC++ redistributable installation.
 
 ## Important limitations
 
 This is an MVP, not a Dante-compatible production system. Pairing control has
-no encryption or persistent authentication, discovery is manual, Auto mode
-does not yet consume measured feedback, and Windows virtual audio devices are
-not implemented. Use it only on a trusted LAN. Remote matrix routing requires
-both computers to run the same recent OAMR portable release.
+no encryption or persistent authentication, Auto mode does not yet consume
+measured feedback, and Windows virtual audio devices are not implemented. Use
+it only on a trusted LAN. Remote matrix routing and discovery require both
+computers to run the same recent OAMR portable release.
 
 ## Quick start: Windows portable package
 
@@ -43,7 +45,7 @@ both computers to run the same recent OAMR portable release.
 5. Use **音频矩阵** to create local or paired RTP routes. Modify quality,
    target latency and mode afterwards in **路由表**.
 
-Allow inbound TCP 8791 on a Private Windows network. RTP media ports are
+Allow inbound TCP 8791 and discovery UDP 8792 on a Private Windows network. RTP media ports are
 selected dynamically from the 52000 range for paired matrix routes; permit the
 corresponding UDP traffic between the two trusted machines.
 

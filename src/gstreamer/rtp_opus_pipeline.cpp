@@ -187,7 +187,11 @@ public:
             gchar* debug = nullptr;
             gst_message_parse_error(message, &gst_error, &debug);
             error = gst_error ? gst_error->message : "Unknown GStreamer error.";
-            if (debug != nullptr) g_free(debug);
+            if (debug != nullptr) {
+                error += "\nGStreamer debug: ";
+                error += debug;
+                g_free(debug);
+            }
             if (gst_error != nullptr) g_error_free(gst_error);
         } else {
             error = "GStreamer pipeline reached end of stream.";

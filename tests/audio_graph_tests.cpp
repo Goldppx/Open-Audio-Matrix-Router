@@ -1,5 +1,6 @@
 #include "oamr/core/audio_graph.hpp"
 #include "oamr/audio/audio_types.hpp"
+#include "oamr/diagnostics/log.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -31,5 +32,12 @@ int main() {
     assert(oamr::audio::adapt_quality(oamr::audio::AudioQuality::Low,
         {oamr::audio::AudioQuality::High, 100, oamr::audio::LatencyMode::Auto}, {40, 3, 0})
         == oamr::audio::AudioQuality::Medium);
+
+    diagnostics::write(diagnostics::Level::Info, "diagnostic-test");
+    const auto diagnostic_entries = diagnostics::entries_after(0);
+    assert(!diagnostic_entries.empty());
+    assert(diagnostic_entries.back().message == "diagnostic-test");
+    assert(std::string{diagnostics::level_name(diagnostic_entries.back().level)} == "INFO");
+    assert(diagnostics::entries_after(diagnostic_entries.back().sequence).empty());
     std::cout << "AudioGraph tests passed.\n";
 }

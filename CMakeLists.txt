@@ -34,6 +34,7 @@ FetchContent_MakeAvailable(oamr_boost)
 # ---------------------------------------------------------------------------
 add_library(oamr_core
     src/core/audio_graph.cpp
+    src/core/diagnostic_log.cpp
 )
 add_library(oamr::core ALIAS oamr_core)
 
@@ -71,7 +72,7 @@ else()
     target_compile_options(oamr_pairing PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-target_link_libraries(oamr_pairing PRIVATE Boost::beast Boost::asio Boost::system)
+target_link_libraries(oamr_pairing PRIVATE oamr::core Boost::beast Boost::asio Boost::system)
 if(WIN32)
     target_link_libraries(oamr_pairing PRIVATE ws2_32)
 endif()
