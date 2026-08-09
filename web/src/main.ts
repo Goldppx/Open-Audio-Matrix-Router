@@ -2,7 +2,6 @@ import '@material/web/button/filled-button.js';
 import '@material/web/button/outlined-button.js';
 import '@material/web/button/text-button.js';
 import '@material/web/checkbox/checkbox.js';
-import '@material/web/chips/assist-chip.js';
 import '@material/web/dialog/dialog.js';
 import '@material/web/divider/divider.js';
 import '@material/web/iconbutton/icon-button.js';
@@ -94,21 +93,20 @@ function renderShell(): void {
   app.innerHTML = `
     <main class="app-shell">
       <header class="app-header">
-        <div><h1>Open Audio Matrix Router</h1><p>本机音频矩阵 · 配对设备 · RTP/Opus 局域网传输</p></div>
-        <md-assist-chip class="status-chip" label="仅本机 Web UI"></md-assist-chip>
+        <h1>Open Audio Matrix Router</h1>
       </header>
       <div class="grid">
-        <section class="card wide"><h2>路由表</h2><p class="muted">每条路线独立运行。网络路线的音质、最大延迟和模式在这里修改。</p><div id="routeTable" class="empty">正在加载路线…</div><div class="actions"><md-outlined-button id="stopAll">停止并清空所有路由</md-outlined-button></div></section>
+        <section class="card wide"><h2>路由表</h2><div id="routeTable" class="empty">正在加载路线…</div><div class="actions"><md-outlined-button id="stopAll">停止并清空所有路由</md-outlined-button></div></section>
 
-        <section class="card"><h2>发送到局域网</h2><p class="muted">为未配对设备手工创建 RTP 发送路线。</p><div class="stack"><md-outlined-select id="networkSource" label="音频来源"></md-outlined-select><div class="form-grid"><md-outlined-text-field id="sendHost" label="IP / 主机名" value="127.0.0.1"></md-outlined-text-field><md-outlined-text-field id="sendPort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field></div><md-filled-button id="createSender">创建发送路线</md-filled-button></div></section>
-        <section class="card"><h2>从局域网接收</h2><p class="muted">为未配对设备手工创建 RTP 接收路线。</p><div class="stack"><md-outlined-select id="receiveSink" label="播放到"></md-outlined-select><md-outlined-text-field id="receivePort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field><md-filled-button id="createReceiver">创建接收路线</md-filled-button></div></section>
+        <section class="card"><h2>发送到局域网</h2><div class="stack"><md-outlined-select id="networkSource" label="音频来源"></md-outlined-select><div class="form-grid"><md-outlined-text-field id="sendHost" label="IP / 主机名" value="127.0.0.1"></md-outlined-text-field><md-outlined-text-field id="sendPort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field></div><md-filled-button id="createSender">创建发送路线</md-filled-button></div></section>
+        <section class="card"><h2>从局域网接收</h2><div class="stack"><md-outlined-select id="receiveSink" label="播放到"></md-outlined-select><md-outlined-text-field id="receivePort" label="UDP 端口" type="number" value="5004"></md-outlined-text-field><md-filled-button id="createReceiver">创建接收路线</md-filled-button></div></section>
 
-        <section class="card wide"><h2>音频矩阵</h2><p class="muted">勾选来源与播放目标的交叉点即可创建路线。本机、已配对设备都会列在这里；网络路线的属性在路由表中设置。</p><div id="matrix" class="data-table-wrap"><div class="empty">正在加载设备…</div></div><div class="actions"><md-filled-button id="applyMatrix">添加已勾选的路线</md-filled-button></div></section>
+        <section class="card wide"><h2>音频矩阵</h2><div id="matrix" class="data-table-wrap"><div class="empty">正在加载设备…</div></div><div class="actions"><md-filled-button id="applyMatrix">添加已勾选的路线</md-filled-button></div></section>
 
-        <section class="card wide"><h2>设备配对</h2><p class="muted">网页仅监听本机。配对控制使用 TCP 8791，一次性代码十分钟有效且仅能使用一次。</p><div class="form-grid"><md-outlined-text-field id="localAlias" label="本机别名"></md-outlined-text-field><md-outlined-text-field label="配对控制端口" value="8791" disabled></md-outlined-text-field></div><p class="muted">允许已配对设备看到的本机端点</p><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="form-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly></md-outlined-text-field><md-outlined-button id="newCode">生成新代码</md-outlined-button></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><div class="form-grid"><md-outlined-text-field id="peerPort" label="TCP 端口" type="number" value="8791"></md-outlined-text-field><md-outlined-text-field id="peerAlias" label="别名" placeholder="客厅电脑"></md-outlined-text-field></div><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field><md-filled-button id="pairRemote">开始配对</md-filled-button></div></div></section>
+        <section class="card wide"><h2>设备配对</h2><div class="form-grid"><md-outlined-text-field id="localAlias" label="本机别名"></md-outlined-text-field><md-outlined-text-field label="配对控制端口" value="8791" disabled></md-outlined-text-field></div><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="form-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly></md-outlined-text-field><md-outlined-button id="newCode">生成新代码</md-outlined-button></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><div class="form-grid"><md-outlined-text-field id="peerPort" label="TCP 端口" type="number" value="8791"></md-outlined-text-field><md-outlined-text-field id="peerAlias" label="别名" placeholder="客厅电脑"></md-outlined-text-field></div><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field><md-filled-button id="pairRemote">开始配对</md-filled-button></div></div></section>
 
-        <section class="card wide"><h2>已配对设备与传输遥测</h2><p class="muted">保存开放设备、修改别名、启动或停止网络流后会同步；此处每五秒自动刷新。</p><div id="peerList" class="empty">尚未配对设备。</div></section>
-        <section class="card wide"><h2>运行日志</h2><pre id="status" class="log">正在加载设备…</pre></section>
+        <section class="card wide"><h2>已配对设备与传输遥测</h2><div id="peerList" class="empty">尚未配对设备。</div></section>
+        <section class="card wide"><h2>运行日志</h2><pre id="status" class="log">No log entries.</pre></section>
       </div>
     </main>
     <md-dialog id="peerDialog"><div slot="headline">编辑已配对设备</div><form id="peerForm" slot="content" class="dialog-form" method="dialog"><md-outlined-text-field id="editAlias" label="别名"></md-outlined-text-field><md-outlined-text-field id="editHost" label="IP / 主机名"></md-outlined-text-field><md-outlined-text-field id="editPort" label="TCP 端口" type="number"></md-outlined-text-field></form><div slot="actions"><md-text-button id="cancelPeer">取消</md-text-button><md-filled-button id="savePeer">保存</md-filled-button></div></md-dialog>`;
@@ -131,7 +129,7 @@ function enhancePanels(): void {
     const languageLabel = language === 'en' ? 'Choose language' : '选择语言';
     const controls = document.createElement('div');
     controls.className = 'header-controls';
-    controls.innerHTML = `<span id="uiNotice" class="ui-notice"></span><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><span aria-hidden="true">文</span></md-icon-button><md-menu id="languageMenu" anchor="uiLanguage"><md-menu-item data-language="zh-CN"><div slot="headline">中文</div></md-menu-item><md-menu-item data-language="en"><div slot="headline">English</div></md-menu-item></md-menu><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><span aria-hidden="true">◐</span></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><span aria-hidden="true">↻</span></md-icon-button>`;
+    controls.innerHTML = `<span id="uiNotice" class="ui-notice"></span><md-icon-button id="uiLanguage" title="${languageLabel}" aria-label="${languageLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.87 15.07 10.33 12.56l.03-.03A17.3 17.3 0 0 0 14.07 6h2.86V4h-7V2h-2v2H1v2h11.17a15.4 15.4 0 0 1-2.82 5.35A15.1 15.1 0 0 1 7.35 8.6h-2a17 17 0 0 0 2.73 4.17l-5.07 5.02L4.41 19.2l5-5 3.11 3.11.35-2.24ZM18.5 10h-2l-4.5 12h2l1.12-3h4.75L21 22h2l-4.5-12Zm-2.63 7 1.63-4.33L19.13 17h-3.26Z"/></svg></md-icon-button><md-menu id="languageMenu" anchor="uiLanguage"><md-menu-item data-language="zh-CN"><div slot="headline">中文</div></md-menu-item><md-menu-item data-language="en"><div slot="headline">English</div></md-menu-item></md-menu><md-icon-button id="themeToggle" title="${themeLabel}" aria-label="${themeLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.91-.1-1.35A7 7 0 0 1 12 3Z"/></svg></md-icon-button><md-icon-button id="refreshPage" title="${refreshLabel}" aria-label="${refreshLabel}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button>`;
     header.append(controls);
     byId<HTMLElement>('uiLanguage').addEventListener('click', () => {
       const menu = byId<HTMLElement & { show: () => void }>('languageMenu');
@@ -366,8 +364,6 @@ async function start(): Promise<void> {
     byId<ValueElement>('localAlias').value = local.alias;
     renderDeviceControls();
     await Promise.all([refreshPeers(), refreshRoutes()]);
-    setStatus('设备已就绪。');
-    logEvent('Application ready.', 'INFO');
     window.setInterval(() => { void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); }, 5000);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
