@@ -24,6 +24,10 @@ type Peer = {
 type DiscoveredDevice = { nodeId: string; alias: string; host: string; port: number };
 type DiscoveryState = { enabled: boolean; devices: DiscoveredDevice[] };
 type Route = { id: number; label: string; enabled: boolean; network: boolean; quality?: Quality; latency?: number; mode?: Mode };
+type MatrixChoice = {
+  key: string; source?: string; sink?: string; kind?: 'send' | 'receive'; peer?: string;
+  remote?: string; local?: string; loopback: boolean; sourceName: string; targetName: string;
+};
 type Checkable = HTMLElement & { checked: boolean };
 type ValueElement = HTMLElement & { value: string };
 type DialogElement = HTMLElement & { show: () => Promise<void>; close: () => Promise<void> };
@@ -31,7 +35,10 @@ type DialogElement = HTMLElement & { show: () => Promise<void>; close: () => Pro
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let devices: Devices = { sources: [], sinks: [] };
 let peers: Peer[] = [];
-let matrixDirty = false;
+const matrixSelections = new Set<string>();
+const matrixChoices = new Map<string, MatrixChoice>();
+let mobileMatrixSource = '';
+let matrixView: 'auto' | 'builder' | 'matrix' = 'auto';
 let peerTopologyFingerprint = '';
 let routeFingerprint = '';
 let discoveryFingerprint = '';
@@ -319,7 +326,9 @@ function applyPreferences(): void {
     '传输属性': 'Transport properties', '路线': 'Route', '状态': 'Status', '操作': 'Actions', '低': 'Low', '中': 'Medium', '高': 'High',
     '正在加载路线…': 'Loading routes…', '正在加载设备…': 'Loading devices…', '更新地址': 'Update address', '更新设备地址': 'Update device address', '网络': 'Network',
     '编辑已配对设备': 'Edit paired device', '设备名称': 'Device name', '局域网发现': 'LAN discovery', '发现不会公开网页或配对密钥。': 'Discovery does not expose the web UI or pairing codes.',
-    '启用发现': 'Enable discovery', '启用后会显示同一局域网中已启用发现的 OAMR 设备。': 'Enabled OAMR devices on this LAN appear here.', '正在搜索局域网中的 OAMR 设备…': 'Searching for OAMR devices on this LAN…'
+    '启用发现': 'Enable discovery', '启用后会显示同一局域网中已启用发现的 OAMR 设备。': 'Enabled OAMR devices on this LAN appear here.', '正在搜索局域网中的 OAMR 设备…': 'Searching for OAMR devices on this LAN…',
+    '路线选择': 'Route builder', '矩阵视图': 'Matrix view', '选择一个音频来源，然后勾选一个或多个播放目标。': 'Choose one audio source, then select one or more playback targets.',
+    '播放目标': 'Playback targets', '本机': 'Local', '尚未选择路线。': 'No routes selected.'
   };
   const translate = (input: string) => dictionary[input.trim()] ?? input;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -341,23 +350,95 @@ function isRemoteDevice(device: Device | RemoteDevice): device is RemoteDevice {
   return 'remote' in device && device.remote === true;
 }
 
+function matrixDeviceKey(device: Device | RemoteDevice): string {
+  return isRemoteDevice(device) ? `remote:${device.peer}:${device.id}` : `local:${device.id}`;
+}
+
+function matrixChoice(source: Device | RemoteDevice, sink: Device | RemoteDevice): MatrixChoice | undefined {
+  if (isRemoteDevice(source) && isRemoteDevice(sink)) return undefined;
+  if (isRemoteDevice(source)) {
+    const key = JSON.stringify(['receive', source.peer, source.id, sink.id]);
+    return { key, kind: 'receive', peer: source.peer, remote: source.id, local: sink.id, loopback: false, sourceName: source.name, targetName: sink.name };
+  }
+  if (isRemoteDevice(sink)) {
+    const key = JSON.stringify(['send', sink.peer, sink.id, source.id, source.renderLoopback === true]);
+    return { key, kind: 'send', peer: sink.peer, remote: sink.id, local: source.id, loopback: source.renderLoopback === true, sourceName: source.name, targetName: sink.name };
+  }
+  if (source.renderLoopback && source.endpoint === sink.endpoint) return undefined;
+  const key = JSON.stringify(['local', source.id, sink.id, source.renderLoopback === true]);
+  return { key, source: source.id, sink: sink.id, loopback: source.renderLoopback === true, sourceName: source.name, targetName: sink.name };
+}
+
+function matrixCheckbox(choice: MatrixChoice): string {
+  return `<md-checkbox data-matrix-key="${escapeHtml(choice.key)}"${matrixSelections.has(choice.key) ? ' checked' : ''}></md-checkbox>`;
+}
+
+function matrixSummaryHtml(): string {
+  const selected = [...matrixSelections].map(key => matrixChoices.get(key)).filter((choice): choice is MatrixChoice => choice !== undefined);
+  if (!selected.length) return `<div class="matrix-summary-empty">${uiLabel('尚未选择路线。', 'No routes selected.')}</div>`;
+  return `<div class="matrix-summary-title">${uiLabel(`已选择 ${selected.length} 条路线`, `${selected.length} route${selected.length === 1 ? '' : 's'} selected`)}</div>${selected.map(choice => `<div class="matrix-summary-route"><span>${escapeHtml(choice.sourceName)}</span><span aria-hidden="true">→</span><span>${escapeHtml(choice.targetName)}</span></div>`).join('')}`;
+}
+
+function updateMatrixViewState(): void {
+  const host = document.querySelector<HTMLElement>('#matrix');
+  if (!host) return;
+  host.dataset.view = matrixView;
+  const effective = matrixView === 'auto' ? (window.matchMedia('(max-width: 719px)').matches ? 'builder' : 'matrix') : matrixView;
+  document.querySelectorAll<HTMLButtonElement>('[data-matrix-view]').forEach(button => {
+    const active = button.dataset.matrixView === effective;
+    button.classList.toggle('selected', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function wireMatrixControls(): void {
+  document.querySelectorAll<Checkable>('[data-matrix-key]').forEach(item => item.addEventListener('change', () => {
+    const key = item.dataset.matrixKey!;
+    if (item.checked) matrixSelections.add(key); else matrixSelections.delete(key);
+    document.querySelectorAll<Checkable>('[data-matrix-key]').forEach(peer => { if (peer.dataset.matrixKey === key) peer.checked = item.checked; });
+    const summary = document.querySelector<HTMLElement>('.matrix-selection-summary');
+    if (summary) summary.innerHTML = matrixSummaryHtml();
+  }));
+  document.querySelectorAll<HTMLButtonElement>('[data-matrix-view]').forEach(button => button.addEventListener('click', () => {
+    matrixView = button.dataset.matrixView === 'builder' ? 'builder' : 'matrix';
+    updateMatrixViewState();
+  }));
+  document.querySelector<HTMLElement>('#matrixMobileSource')?.addEventListener('change', () => {
+    mobileMatrixSource = value('matrixMobileSource');
+    renderMatrix();
+  });
+  updateMatrixViewState();
+}
+
 function renderMatrix(): void {
   const remoteSources = remoteDevices('source');
   const remoteSinks = remoteDevices('sink');
   const sources = [...devices.sources, ...remoteSources];
   const sinks = [...devices.sinks, ...remoteSinks];
+  matrixChoices.clear();
+  for (const source of sources) for (const sink of sinks) {
+    const choice = matrixChoice(source, sink);
+    if (choice) matrixChoices.set(choice.key, choice);
+  }
+  for (const key of [...matrixSelections]) if (!matrixChoices.has(key)) matrixSelections.delete(key);
+  if (!sources.some(source => matrixDeviceKey(source) === mobileMatrixSource)) mobileMatrixSource = sources[0] ? matrixDeviceKey(sources[0]) : '';
+  const activeSource = sources.find(source => matrixDeviceKey(source) === mobileMatrixSource);
   const rows = sources.map(source => {
     const cells = sinks.map(sink => {
-      if (isRemoteDevice(source) && isRemoteDevice(sink)) return '<td class="disabled">暂不支持</td>';
-      if (isRemoteDevice(source)) return `<td><md-checkbox data-kind="receive" data-peer="${escapeHtml(source.peer)}" data-remote="${escapeHtml(source.id)}" data-local="${escapeHtml(sink.id)}"></md-checkbox></td>`;
-      if (isRemoteDevice(sink)) return `<td><md-checkbox data-kind="send" data-peer="${escapeHtml(sink.peer)}" data-remote="${escapeHtml(sink.id)}" data-local="${escapeHtml(source.id)}" data-loopback="${source.renderLoopback === true}"></md-checkbox></td>`;
-      if (source.renderLoopback && source.endpoint === sink.endpoint) return '<td class="disabled">禁用</td>';
-      return `<td><md-checkbox data-source="${escapeHtml(source.id)}" data-sink="${escapeHtml(sink.id)}" data-loopback="${source.renderLoopback === true}"></md-checkbox></td>`;
+      const choice = matrixChoice(source, sink);
+      if (!choice) return `<td class="disabled">${isRemoteDevice(source) && isRemoteDevice(sink) ? '暂不支持' : '禁用'}</td>`;
+      return `<td>${matrixCheckbox(choice)}</td>`;
     }).join('');
     return `<tr><th>${escapeHtml(source.name)}${isRemoteDevice(source) ? ' <small>网络</small>' : ''}</th>${cells}</tr>`;
   }).join('');
-  byId<HTMLElement>('matrix').innerHTML = `<div class="data-table-wrap"><table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${isRemoteDevice(sink) ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
-  document.querySelectorAll<HTMLElement>('#matrix md-checkbox').forEach(item => item.addEventListener('change', () => { matrixDirty = true; }));
+  const sourceOptions = sources.map(source => `<md-select-option value="${escapeHtml(matrixDeviceKey(source))}"${matrixDeviceKey(source) === mobileMatrixSource ? ' selected' : ''}><div slot="headline">${escapeHtml(source.name)}${isRemoteDevice(source) ? ' · 网络' : ''}</div></md-select-option>`).join('');
+  const targets = activeSource ? sinks.map(sink => {
+    const choice = matrixChoice(activeSource, sink);
+    const origin = isRemoteDevice(sink) ? '网络' : '本机';
+    return `<label class="matrix-target${choice ? '' : ' disabled'}">${choice ? matrixCheckbox(choice) : '<span class="matrix-disabled-mark">—</span>'}<span class="matrix-target-name">${escapeHtml(sink.name)}</span><span class="matrix-origin">${origin}</span></label>`;
+  }).join('') : '<div class="empty">正在加载设备…</div>';
+  byId<HTMLElement>('matrix').innerHTML = `<div class="matrix-toolbar" role="group" aria-label="${uiLabel('矩阵显示方式', 'Matrix display mode')}"><button type="button" data-matrix-view="builder">路线选择</button><button type="button" data-matrix-view="matrix">矩阵视图</button></div><div class="matrix-builder"><p class="matrix-help">选择一个音频来源，然后勾选一个或多个播放目标。</p><md-outlined-select id="matrixMobileSource" label="音频来源">${sourceOptions}</md-outlined-select><div class="matrix-target-heading">播放目标</div><div class="matrix-targets">${targets}</div><div class="matrix-selection-summary" aria-live="polite">${matrixSummaryHtml()}</div></div><div class="matrix-desktop data-table-wrap"><table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${isRemoteDevice(sink) ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  wireMatrixControls();
   applyPreferences();
 }
 
@@ -467,7 +548,7 @@ async function refreshPeers(): Promise<void> {
   if (topologyChanged) {
     peerTopologyFingerprint = nextTopology;
     renderPeers();
-    if (!matrixDirty) renderMatrix();
+    renderMatrix();
   } else {
     updatePeerTelemetry();
   }
@@ -483,20 +564,20 @@ async function refreshRoutes(): Promise<void> {
 }
 
 async function applyMatrix(): Promise<void> {
-  const selected = checked('#matrix md-checkbox');
+  const selected = [...matrixSelections].map(key => matrixChoices.get(key)).filter((choice): choice is MatrixChoice => choice !== undefined);
   if (!selected.length) { logEvent('Select at least one matrix route.', 'WARNING'); return; }
-  const local = selected.filter(item => item.dataset.source);
-  const remote = selected.filter(item => item.dataset.kind);
+  const local = selected.filter(item => item.source !== undefined);
+  const remote = selected.filter(item => item.kind !== undefined);
   if (local.length) {
-    const routes = local.map(item => `${item.dataset.source}\t${item.dataset.loopback}\t${item.dataset.sink}`).join('\n');
+    const routes = local.map(item => `${item.source}\t${item.loopback}\t${item.sink}`).join('\n');
     await post(`/api/matrix?routes=${encodeURIComponent(routes)}`);
   }
   for (const item of remote) {
-    const query = new URLSearchParams({ peer: item.dataset.peer!, kind: item.dataset.kind!, local: item.dataset.local!, remote: item.dataset.remote!, loopback: item.dataset.loopback ?? 'false', quality: 'medium', 'max-latency-ms': '100', mode: 'auto' });
+    const query = new URLSearchParams({ peer: item.peer!, kind: item.kind!, local: item.local!, remote: item.remote!, loopback: String(item.loopback), quality: 'medium', 'max-latency-ms': '100', mode: 'auto' });
     await post(`/api/paired/route?${query}`);
   }
   await refreshPeers();
-  matrixDirty = false;
+  matrixSelections.clear();
   renderMatrix();
 }
 
@@ -529,6 +610,7 @@ function wireEvents(): void {
 
 async function start(): Promise<void> {
   renderShell();
+  window.matchMedia('(max-width: 719px)').addEventListener('change', updateMatrixViewState);
   wireEvents();
   enhancePanels();
   applyPreferences();
