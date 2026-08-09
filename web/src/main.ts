@@ -13,7 +13,7 @@ import './style.css';
 type Direction = 'source' | 'sink';
 type Quality = 'low' | 'medium' | 'high';
 type Mode = 'stable' | 'auto' | 'low-latency';
-type Device = { id: string; name: string; endpoint?: string; renderLoopback?: boolean; peer?: string; remote?: boolean };
+type Device = { id: string; name: string; endpoint?: string; renderLoopback?: boolean };
 type RemoteDevice = Device & { peer: string; remote: true };
 type Devices = { sources: Device[]; sinks: Device[] };
 type Endpoint = { id: string; name: string; direction: Direction };
@@ -66,10 +66,6 @@ function logEvent(message: string, level: LogLevel = 'INFO'): void {
   renderLogs();
 }
 
-function setStatus(message: string, _level: LogLevel = 'INFO'): void {
-  void message;
-}
-
 /**
  * Material Web's dialog scroll container lives in its open Shadow DOM and does
  * not expose a CSS part or a scrollbar token. Add the same app-local scrollbar
@@ -82,9 +78,9 @@ function styleDialogScrollbar(dialog: DialogElement): void {
     const style = document.createElement('style');
     style.dataset.oamrDialogScrollbar = 'true';
     style.textContent = `.scroller { scrollbar-color: var(--md-sys-color-primary) var(--md-sys-color-surface-container-highest); scrollbar-width: thin; }
-      .scroller::-webkit-scrollbar { width: 12px; height: 12px; }
-      .scroller::-webkit-scrollbar-track { margin: 5px; border-radius: 999px; background: var(--md-sys-color-surface-container-highest); }
-      .scroller::-webkit-scrollbar-thumb { min-height: 28px; border: 3px solid var(--md-sys-color-surface-container-highest); border-radius: 999px; background: var(--md-sys-color-primary); }
+      .scroller::-webkit-scrollbar { width: var(--oamr-scrollbar-size); height: var(--oamr-scrollbar-size); }
+      .scroller::-webkit-scrollbar-track { margin: var(--oamr-space-1); border-radius: var(--oamr-radius-pill); background: var(--md-sys-color-surface-container-highest); }
+      .scroller::-webkit-scrollbar-thumb { min-height: 28px; border: 3px solid var(--md-sys-color-surface-container-highest); border-radius: var(--oamr-radius-pill); background: var(--md-sys-color-primary); }
       .scroller::-webkit-scrollbar-thumb:hover { background: var(--md-sys-color-primary); }`;
     root.append(style);
   };
@@ -108,17 +104,21 @@ async function request(path: string, method = 'GET'): Promise<string> {
   return body;
 }
 
+async function refreshPairCode(regenerate = false): Promise<void> {
+  const code = await request('/api/pair/code', regenerate ? 'POST' : 'GET');
+  const output = byId<HTMLOutputElement>('pairCode');
+  if (output.textContent !== code) output.textContent = code;
+}
+
 async function post(path: string): Promise<string> {
   try {
     const message = await request(path, 'POST');
-    setStatus(message);
     if (/failed|could not|invalid|error/i.test(message)) logEvent(message, 'ERROR');
     else if (/route|pair/i.test(path)) logEvent(message, 'INFO');
     await refreshRoutes();
     return message;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setStatus(`Operation failed: ${message}`);
     logEvent(`Operation failed: ${message}`, 'ERROR');
     throw error;
   }
@@ -147,7 +147,7 @@ function renderShell(): void {
 
         <section class="card wide"><h2>音频矩阵</h2><div id="matrix" class="matrix-host"><div class="data-table-wrap matrix-placeholder empty">正在加载设备…</div></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="applyMatrix"', uiLabel('添加已勾选的路线', 'Add selected routes'), icons.addLink)}</div></div></section>
 
-        <section class="card wide"><h2>设备配对</h2><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="pairing-grid"><div class="stack"><md-outlined-text-field id="pairCode" label="一次性配对代码" readonly><md-icon-button id="newCode" class="code-action" slot="trailing-icon" title="${language === 'en' ? 'Generate code' : '生成新代码'}" aria-label="${language === 'en' ? 'Generate code' : '生成新代码'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button></md-outlined-text-field></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field></div></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="pairRemote"', uiLabel('开始配对', 'Pair device'), icons.pair)}</div></div></section>
+        <section class="card wide"><h2>设备配对</h2><div id="exposure" class="exposure-list"></div><div class="actions"><md-outlined-button id="saveProfile">保存开放设备</md-outlined-button></div><md-divider></md-divider><div class="pairing-grid"><div class="stack"><div class="pair-code-field" role="group" aria-labelledby="pairCodeLabel"><span id="pairCodeLabel" class="pair-code-label">一次性配对代码</span><output id="pairCode" class="pair-code-value" aria-live="polite">••••••</output><md-icon-button id="newCode" class="code-action" title="${language === 'en' ? 'Generate code' : '生成新代码'}" aria-label="${language === 'en' ? 'Generate code' : '生成新代码'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg></md-icon-button></div></div><div class="stack"><md-outlined-text-field id="peerHost" label="另一台设备的 IP / 主机名" placeholder="192.168.31.100"></md-outlined-text-field><md-outlined-text-field id="peerCode" label="对方的一次性代码"></md-outlined-text-field></div></div><div class="card-action-bar"><div class="icon-action">${iconButton('id="pairRemote"', uiLabel('开始配对', 'Pair device'), icons.pair)}</div></div></section>
 
         <section class="card wide"><h2>已配对设备与传输遥测</h2><div id="peerList" class="peer-list-host"><div class="peer-list-placeholder empty">尚未配对设备。</div></div></section>
         <section class="card wide"><h2>运行日志</h2><pre id="status" class="log">No log entries.</pre></section>
@@ -335,22 +335,21 @@ function renderMatrix(): void {
   const sinks = [...devices.sinks, ...remoteSinks];
   const rows = sources.map(source => {
     const cells = sinks.map(sink => {
-      if ('remote' in source && 'remote' in sink) return '<td class="disabled">暂不支持</td>';
-      if ('remote' in source) return `<td><md-checkbox data-kind="receive" data-peer="${escapeHtml(source.peer)}" data-remote="${escapeHtml(source.id)}" data-local="${escapeHtml(sink.id)}"></md-checkbox></td>`;
-      if ('remote' in sink) return `<td><md-checkbox data-kind="send" data-peer="${escapeHtml(sink.peer)}" data-remote="${escapeHtml(sink.id)}" data-local="${escapeHtml(source.id)}" data-loopback="${source.renderLoopback === true}"></md-checkbox></td>`;
+      if (isRemoteDevice(source) && isRemoteDevice(sink)) return '<td class="disabled">暂不支持</td>';
+      if (isRemoteDevice(source)) return `<td><md-checkbox data-kind="receive" data-peer="${escapeHtml(source.peer)}" data-remote="${escapeHtml(source.id)}" data-local="${escapeHtml(sink.id)}"></md-checkbox></td>`;
+      if (isRemoteDevice(sink)) return `<td><md-checkbox data-kind="send" data-peer="${escapeHtml(sink.peer)}" data-remote="${escapeHtml(sink.id)}" data-local="${escapeHtml(source.id)}" data-loopback="${source.renderLoopback === true}"></md-checkbox></td>`;
       if (source.renderLoopback && source.endpoint === sink.endpoint) return '<td class="disabled">禁用</td>';
       return `<td><md-checkbox data-source="${escapeHtml(source.id)}" data-sink="${escapeHtml(sink.id)}" data-loopback="${source.renderLoopback === true}"></md-checkbox></td>`;
     }).join('');
-    return `<tr><th>${escapeHtml(source.name)}${'remote' in source ? ' <small>网络</small>' : ''}</th>${cells}</tr>`;
+    return `<tr><th>${escapeHtml(source.name)}${isRemoteDevice(source) ? ' <small>网络</small>' : ''}</th>${cells}</tr>`;
   }).join('');
-  byId<HTMLElement>('matrix').innerHTML = `<div class="data-table-wrap"><table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${'remote' in sink ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  byId<HTMLElement>('matrix').innerHTML = `<div class="data-table-wrap"><table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${isRemoteDevice(sink) ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   document.querySelectorAll<HTMLElement>('#matrix md-checkbox').forEach(item => item.addEventListener('change', () => { matrixDirty = true; }));
   applyPreferences();
 }
 
 function renderRoutes(routes: Route[]): void {
   const rows = routes.map(route => {
-    const deleteText = deleteConfirmation === route.id ? '确认删除' : '删除';
     const deleteClass = deleteConfirmation === route.id ? 'danger-action' : '';
     const configuration = route.network ? iconButton(`data-config="${route.id}"`, uiLabel('配置路线', 'Configure route'), icons.edit) : '';
     const toggle = iconButton(`data-toggle="${route.id}" data-enabled="${!route.enabled}"`, route.enabled ? uiLabel('暂停路线', 'Pause route') : uiLabel('恢复路线', 'Resume route'), route.enabled ? icons.pause : icons.play);
@@ -362,7 +361,7 @@ function renderRoutes(routes: Route[]): void {
   document.querySelectorAll<HTMLElement>('[data-config]').forEach(button => button.addEventListener('click', () => openRouteDialog(routes.find(route => route.id === Number(button.dataset.config))!)));
   document.querySelectorAll<HTMLElement>('[data-delete]').forEach(button => button.addEventListener('click', () => {
     const id = Number(button.dataset.delete);
-    if (deleteConfirmation !== id) { deleteConfirmation = id; renderRoutes(routes); setStatus('再次点击“确认删除”才会移除此路线。', 'WARNING'); return; }
+    if (deleteConfirmation !== id) { deleteConfirmation = id; renderRoutes(routes); return; }
     deleteConfirmation = undefined;
     void post(`/api/routes/${id}/delete`);
   }));
@@ -472,7 +471,7 @@ async function refreshRoutes(): Promise<void> {
 
 async function applyMatrix(): Promise<void> {
   const selected = checked('#matrix md-checkbox');
-  if (!selected.length) { setStatus('请至少选择一条矩阵路线。'); return; }
+  if (!selected.length) { logEvent('Select at least one matrix route.', 'WARNING'); return; }
   const local = selected.filter(item => item.dataset.source);
   const remote = selected.filter(item => item.dataset.kind);
   if (local.length) {
@@ -492,7 +491,7 @@ function wireEvents(): void {
   byId<HTMLElement>('stopAll').addEventListener('click', () => void post('/api/stop'));
   byId<HTMLElement>('createSender').addEventListener('click', () => {
     const source = devices.sources.find(item => item.id === value('networkSource'));
-    if (!source) { setStatus('请选择音频来源。'); return; }
+    if (!source) { logEvent('Select an audio source before creating a sender route.', 'WARNING'); return; }
     const query = new URLSearchParams({ source: source.id, loopback: String(source.renderLoopback === true), host: value('sendHost'), port: value('sendPort'), quality: 'medium', 'max-latency-ms': '100', mode: 'auto' });
     void post(`/api/network/send?${query}`);
   });
@@ -501,7 +500,7 @@ function wireEvents(): void {
     void post(`/api/network/receive?${query}`);
   });
   byId<HTMLElement>('applyMatrix').addEventListener('click', () => void applyMatrix());
-  byId<HTMLElement>('newCode').addEventListener('click', () => void (async () => { byId<ValueElement>('pairCode').value = await request('/api/pair/code'); setStatus('已生成一次性配对代码；十分钟内有效。'); })());
+  byId<HTMLElement>('newCode').addEventListener('click', () => void refreshPairCode(true).catch(error => logEvent(`Could not regenerate pairing code: ${String(error)}`, 'ERROR')));
   byId<HTMLElement>('saveProfile').addEventListener('click', () => void (async () => {
     const endpoints = checked('#exposure md-checkbox').map(item => `${item.dataset.direction === 'source' ? 'S' : 'K'}\t${item.dataset.id}\t${item.dataset.name}`).join('\n');
     await post(`/api/pair/config?alias=${encodeURIComponent(localAlias)}&endpoints=${encodeURIComponent(endpoints)}`);
@@ -520,16 +519,16 @@ async function start(): Promise<void> {
   wireEvents();
   enhancePanels();
   applyPreferences();
+  void refreshPairCode().catch(error => logEvent(`Could not load pairing code: ${String(error)}`, 'ERROR'));
   try {
     devices = JSON.parse(await request('/api/devices')) as Devices;
     const local = JSON.parse(await request('/api/pair/local')) as { alias: string };
     localAlias = local.alias;
     renderDeviceControls();
     await Promise.all([refreshPeers(), refreshRoutes(), refreshDiscovery()]);
-    window.setInterval(() => { void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); void refreshDiscovery().catch(() => undefined); }, 3000);
+    window.setInterval(() => { void refreshPairCode().catch(() => undefined); void refreshPeers().catch(() => undefined); void refreshRoutes().catch(() => undefined); void refreshDiscovery().catch(() => undefined); }, 3000);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setStatus(language === 'en' ? `Loading failed: ${message}` : `加载失败：${message}`);
     logEvent(`Startup failed: ${message}`, 'ERROR');
   }
 }

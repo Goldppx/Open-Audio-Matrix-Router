@@ -73,7 +73,9 @@ public:
     /** Pushes the complete current catalog and telemetry to every paired peer. */
     void announce();
 
-    /** Generates a six-digit code valid for ten minutes and one use. */
+    /** Returns the active code, generating one only when none is valid. */
+    [[nodiscard]] std::string current_pair_code();
+    /** Replaces the active code with a new six-digit code valid for ten minutes and one use. */
     [[nodiscard]] std::string create_pair_code();
     /** Calls a remote pairing port with its current one-time code. */
     bool pair_remote(const std::string& host, std::uint16_t port, const std::string& alias, const std::string& code);

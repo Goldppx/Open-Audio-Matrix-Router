@@ -156,6 +156,15 @@ public:
     mutable std::map<std::string, DiscoveryEntry> discovered;
     std::function<bool(const RemoteRouteRequest&, std::string&)> route_handler;
 
+    std::string generate_pair_code_unlocked() {
+        pair_code = random_hex(6);
+        std::transform(pair_code.begin(), pair_code.end(), pair_code.begin(), [](unsigned char character) {
+            return static_cast<char>(::toupper(character));
+        });
+        code_expiry = std::chrono::steady_clock::now() + std::chrono::minutes(10);
+        return pair_code;
+    }
+
     std::filesystem::path state_path() const { return std::filesystem::current_path() / "oamr-pairing-state.txt"; }
     void save_unlocked() const {
         std::ofstream file(state_path(), std::ios::trunc);
@@ -302,7 +311,12 @@ void PairingService::set_local_alias(std::string alias) { std::lock_guard lock(i
 std::string PairingService::local_alias() const { std::lock_guard lock(impl_->mutex); return impl_->alias; }
 void PairingService::set_exposed_endpoints(std::vector<ExposedEndpoint> endpoints) { std::lock_guard lock(impl_->mutex); impl_->exposed = std::move(endpoints); impl_->save_unlocked(); }
 std::vector<ExposedEndpoint> PairingService::exposed_endpoints() const { std::lock_guard lock(impl_->mutex); return impl_->exposed; }
-std::string PairingService::create_pair_code() { std::lock_guard lock(impl_->mutex); impl_->pair_code = random_hex(6); std::transform(impl_->pair_code.begin(), impl_->pair_code.end(), impl_->pair_code.begin(), [](unsigned char c) { return static_cast<char>(::toupper(c)); }); impl_->code_expiry = std::chrono::steady_clock::now() + std::chrono::minutes(10); return impl_->pair_code; }
+std::string PairingService::current_pair_code() {
+    std::lock_guard lock(impl_->mutex);
+    if (!impl_->pair_code.empty() && std::chrono::steady_clock::now() <= impl_->code_expiry) return impl_->pair_code;
+    return impl_->generate_pair_code_unlocked();
+}
+std::string PairingService::create_pair_code() { std::lock_guard lock(impl_->mutex); return impl_->generate_pair_code_unlocked(); }
 std::vector<RemotePeer> PairingService::peers() const { std::lock_guard lock(impl_->mutex); std::vector<RemotePeer> result; for (const auto& [_, peer] : impl_->known_peers) result.push_back(peer); return result; }
 bool PairingService::set_discovery_enabled(bool enabled) {
     if (enabled) {

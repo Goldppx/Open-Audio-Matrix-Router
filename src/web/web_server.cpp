@@ -7,11 +7,9 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
-#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -113,28 +111,23 @@ std::optional<std::string> static_asset(const std::string& target, std::string& 
     return std::string{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
-const char* kPairControlPage = R"HTML(
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OAMR</title>
-<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font:15px system-ui;margin:0;background:#101218;color:#eef1f7}.wrap{max-width:1260px;margin:auto;padding:30px 22px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.wide{grid-column:1/-1}.card{background:#191d27;border:1px solid #303746;border-radius:12px;padding:20px}.muted{color:#aab3c3;margin:.4em 0 1em}h1,h2{margin:0 0 8px}h2{font-size:1.18rem}label{display:block;margin:10px 0 4px}input,select,button{font:inherit;padding:10px;border-radius:7px;border:1px solid #465066;background:#10131a;color:#eef1f7;width:100%}button{border:0;background:#6d5dfc;font-weight:700;cursor:pointer;margin-top:14px}.secondary{background:#303746}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.matrix{overflow:auto}table{border-collapse:collapse;min-width:720px;width:100%}th,td{border:1px solid #3b4352;padding:9px;text-align:center}th{background:#222836}td.disabled{background:#151821;color:#697386}input[type=checkbox]{width:20px;height:20px}.expose{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:210px;overflow:auto}.expose label{margin:0;padding:8px;background:#131720;border-radius:6px}.expose input{width:auto;margin-right:7px}code{font-size:1.35rem;letter-spacing:.18em;background:#10131a;padding:7px 10px;border-radius:6px}#status{white-space:pre-wrap;min-height:42px}.peer{border-top:1px solid #303746;padding:10px 0}.badge{display:inline-block;background:#29314a;border-radius:99px;padding:4px 9px;font-size:.82em}.editable{cursor:pointer;text-decoration:underline;text-decoration-style:dotted}@media(max-width:760px){.grid,.row,.expose{grid-template-columns:1fr}.wide{grid-column:auto}}</style>
-<main class=wrap><h1>Open Audio Matrix Router</h1><p class=muted><span class=badge>仅本机 Web UI</span> 配对控制端口为 TCP 8791；网页不会暴露到局域网。</p><div class=grid>
-<section class="card wide"><h2>路由表</h2><p class=muted>每条线路独立运行；网络线路的音质、最大延迟和模式只在这里修改。</p><div id=routeTable class=muted>暂无路由。</div><button class=secondary onclick=stopRoute()>停止并清空所有路由</button></section>
-<section class=card><h2>直接发送到局域网</h2><p class=muted>用于未配对设备；配对设备优先在矩阵中创建。</p><label>音频来源</label><select id=networkSource></select><div class=row><input id=sendHost value=127.0.0.1 placeholder="IP / 主机名"><input id=sendPort type=number value=5004 placeholder="UDP 端口"></div><button onclick=networkStart('send')>创建发送线路</button></section>
-<section class=card><h2>直接从局域网接收</h2><p class=muted>用于未配对设备；配对设备优先在矩阵中创建。</p><label>播放到</label><select id=receiveSink></select><input id=receivePort type=number value=5004 placeholder="UDP 端口"><button onclick=networkStart('receive')>创建接收线路</button></section>
-<section class="card wide"><h2>运行日志</h2><pre id=status class=muted>正在加载设备…</pre></section>
-<section class="card wide"><h2>设备配对</h2><p class=muted>先在要被配对的机器生成一次性代码；再在本机填入那台机器的 IP、TCP 端口和代码。代码十分钟有效，使用一次即失效。</p><div class=row><div><label>本机别名</label><input id=localAlias></div><div><label>配对控制端口</label><input value=8791 disabled></div></div><label>允许已配对机器看到的本机设备</label><div id=exposure class=expose></div><button onclick=savePairProfile()>保存本机开放设备</button><div class=row><div><label>一次性配对代码</label><code id=pairCode>------</code><button class=secondary onclick=newCode()>生成新代码</button></div><div><label>配对另一台机器</label><input id=peerHost placeholder="192.168.31.100"><div class=row><input id=peerPort type=number value=8791><input id=peerAlias placeholder="别名，例如 客厅电脑"></div><input id=peerCode placeholder="对方显示的六位代码"><button onclick=pairRemote()>开始配对</button></div></div></section>
-<section class="card wide"><h2>已配对设备与传输遥测</h2><p class=muted>目录与遥测会在保存开放设备、改别名、开始或停止网络流后同步；此区域也每五秒刷新一次。</p><div id=peers class=muted>尚未配对设备。</div></section>
-<section class="card wide"><h2>音频矩阵</h2><p class=muted>勾选本机或已配对设备之间的格子，即可创建本地或 RTP 网络线路；网络属性稍后在路由表中设置。</p><div id=matrix class=matrix></div><button onclick=applyMatrix()>添加勾选的矩阵线路</button></section>
-</div></main><script>
-let data,peerData=[];const status=x=>document.querySelector('#status').textContent=x,esc=x=>String(x).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function opt(x){return '<option value="'+encodeURIComponent(x.id)+'">'+esc(x.name)+'</option>'}function srcopt(x){return '<option data-loopback="'+x.renderLoopback+'" value="'+encodeURIComponent(x.id)+'">'+esc(x.name)+'</option>'}
-async function load(){data=await fetch('/api/devices').then(x=>x.json());let local=await fetch('/api/pair/local').then(x=>x.json());localAlias.value=local.alias;networkSource.innerHTML=data.sources.map(srcopt).join('');receiveSink.innerHTML=data.sinks.map(opt).join('');exposure.innerHTML=data.sources.map(x=>'<label><input type=checkbox data-e="S" value="'+encodeURIComponent(x.id)+'">来源 · '+esc(x.name)+'</label>').join('')+data.sinks.map(x=>'<label><input type=checkbox data-e="K" value="'+encodeURIComponent(x.id)+'">输出 · '+esc(x.name)+'</label>').join('');await loadPeers();await loadRoutes();status('设备已就绪。')}
-function renderMatrix(){let rs=peerData.flatMap(p=>p.endpoints.filter(e=>e.direction==='source').map(e=>({id:e.id,name:p.alias+' · '+e.name,remote:true,peer:p.nodeId}))),rk=peerData.flatMap(p=>p.endpoints.filter(e=>e.direction==='sink').map(e=>({id:e.id,name:p.alias+' · '+e.name,remote:true,peer:p.nodeId}))),sources=[...data.sources,...rs],sinks=[...data.sinks,...rk];let h='<table><tr><th>来源 \\ 播放目标</th>'+sinks.map(x=>'<th>'+esc(x.name)+(x.remote?' <small>网络</small>':'')+'</th>').join('')+'</tr>';h+=sources.map(a=>'<tr><th>'+esc(a.name)+(a.remote?' <small>网络</small>':'')+'</th>'+sinks.map(b=>a.remote&&b.remote?'<td class=disabled>跨远端待后续</td>':a.remote?'<td><input type=checkbox data-kind="receive" data-peer="'+a.peer+'" data-remote="'+encodeURIComponent(a.id)+'" data-local="'+encodeURIComponent(b.id)+'"></td>':b.remote?'<td><input type=checkbox data-kind="send" data-peer="'+b.peer+'" data-remote="'+encodeURIComponent(b.id)+'" data-local="'+encodeURIComponent(a.id)+'" data-loopback="'+a.renderLoopback+'"></td>':a.renderLoopback&&a.endpoint===b.endpoint?'<td class=disabled>禁用</td>':'<td><input type=checkbox data-source="'+encodeURIComponent(a.id)+'" data-loopback="'+a.renderLoopback+'" data-sink="'+encodeURIComponent(b.id)+'"></td>').join('')+'</tr>').join('')+'</table>';matrix.innerHTML=h}
-async function post(path){const t=await fetch(path,{method:'POST'}).then(x=>x.text());status(t);await loadRoutes();return t}function mirror(){let p=decodeURIComponent(playing.value),t=decodeURIComponent(target.value);if(!p||!t||p===t)return status('请选择不同的播放目标。');post('/api/mirror?source='+encodeURIComponent(p)+'&sink='+encodeURIComponent(t))}
-function networkStart(kind){let q='quality=medium&max-latency-ms=100&mode=auto';if(kind==='send'){let s=networkSource.selectedOptions[0];q+='&source='+encodeURIComponent(decodeURIComponent(s.value))+'&loopback='+s.dataset.loopback+'&host='+encodeURIComponent(sendHost.value)+'&port='+sendPort.value}else q+='&sink='+encodeURIComponent(decodeURIComponent(receiveSink.value))+'&port='+receivePort.value;post('/api/network/'+kind+'?'+q)}
-async function applyMatrix(){let checked=[...matrix.querySelectorAll('input:checked')],local=checked.filter(x=>x.dataset.source),remote=checked.filter(x=>x.dataset.kind);if(!local.length&&!remote.length)return status('请至少选择一条矩阵线路。');if(local.length)await post('/api/matrix?routes='+encodeURIComponent(local.map(x=>decodeURIComponent(x.dataset.source)+'\\t'+x.dataset.loopback+'\\t'+decodeURIComponent(x.dataset.sink)).join('\\n')));for(let x of remote){let q='peer='+encodeURIComponent(x.dataset.peer)+'&kind='+x.dataset.kind+'&local='+encodeURIComponent(decodeURIComponent(x.dataset.local))+'&remote='+encodeURIComponent(decodeURIComponent(x.dataset.remote))+'&loopback='+(x.dataset.loopback||false)+'&quality=medium&max-latency-ms=100&mode=auto';await post('/api/paired/route?'+q)}}function stopRoute(){post('/api/stop')}
-async function savePairProfile(){let e=[...exposure.querySelectorAll('input:checked')].map(x=>x.dataset.e+'\\t'+decodeURIComponent(x.value)+'\\t'+x.parentElement.textContent.trim()).join('\\n');await post('/api/pair/config?alias='+encodeURIComponent(localAlias.value.trim()||'This computer')+'&endpoints='+encodeURIComponent(e));await loadPeers()}async function newCode(){pairCode.textContent=await fetch('/api/pair/code').then(x=>x.text());status('一次性配对代码已生成；十分钟内有效。')}async function pairRemote(){let r=await post('/api/pair/connect?host='+encodeURIComponent(peerHost.value.trim())+'&port='+encodeURIComponent(peerPort.value)+'&alias='+encodeURIComponent(peerAlias.value.trim()||peerHost.value.trim())+'&code='+encodeURIComponent(peerCode.value.trim()));if(r.startsWith('Pairing succeeded'))await loadPeers()}async function editPeer(element){let alias=prompt('远程设备别名',element.dataset.alias);if(!alias)return;let host=prompt('远程 IP / 主机名',element.dataset.host);if(!host)return;let port=prompt('配对控制端口',element.dataset.port);if(!port)return;await post('/api/pair/alias?node='+encodeURIComponent(element.dataset.node)+'&alias='+encodeURIComponent(alias));await post('/api/pair/endpoint?node='+encodeURIComponent(element.dataset.node)+'&host='+encodeURIComponent(host)+'&port='+encodeURIComponent(port));await loadPeers()}async function routeAction(button){await post('/api/routes/'+button.dataset.id+'/'+button.dataset.action+(button.dataset.action==='toggle'?'?enabled='+button.dataset.enabled:''))}async function saveRouteProfile(button){let id=button.dataset.id,q=document.querySelector('#rq'+id).value,l=document.querySelector('#rl'+id).value,m=document.querySelector('#rm'+id).value;await post('/api/routes/'+id+'/profile?quality='+q+'&max-latency-ms='+l+'&mode='+m)}async function loadPeers(){peerData=await fetch('/api/pair/peers').then(x=>x.json());document.querySelector('#peers').innerHTML=peerData.length?peerData.map(p=>{let t=p.telemetry||{},line=t.deviceName?'音质 '+esc(t.quality)+' · 目标延迟 '+t.latencyMs+' ms · 丢包 '+t.packetLossPercent+'% · 设备 '+esc(t.deviceName):'当前未传输音频';return '<div class=peer><span class="editable" data-node="'+esc(p.nodeId)+'" data-alias="'+esc(p.alias)+'" data-host="'+esc(p.host)+'" data-port="'+p.port+'" onclick="editPeer(this)"><b>'+esc(p.alias)+'</b> · '+esc(p.host)+':'+p.port+'</span><br><span class=badge>'+line+'</span><br>'+ (p.endpoints.length?p.endpoints.map(e=>'<span class=badge>'+ (e.direction==='source'?'来源':'输出')+' · '+esc(e.name)+'</span>').join(' '):'<span class=muted>对方未开放设备</span>')+'</div>'}).join(''):'尚未配对设备。';renderMatrix()}async function loadRoutes(){let r=await fetch('/api/routes').then(x=>x.json());routeTable.innerHTML=r.length?r.map(x=>'<div class=peer><b>'+esc(x.label)+'</b> <span class=badge>'+ (x.enabled?'运行中':'已暂停')+'</span>'+ (x.network?'<div class=row><select id=rq'+x.id+'><option '+(x.quality==='low'?'selected':'')+' value=low>低</option><option '+(x.quality==='medium'?'selected':'')+' value=medium>中</option><option '+(x.quality==='high'?'selected':'')+' value=high>高</option></select><select id=rl'+x.id+'><option '+(x.latency===40?'selected':'')+'>40</option><option '+(x.latency===60?'selected':'')+'>60</option><option '+(x.latency===100?'selected':'')+'>100</option><option '+(x.latency===150?'selected':'')+'>150</option></select><select id=rm'+x.id+'><option '+(x.mode==='stable'?'selected':'')+' value=stable>稳定</option><option '+(x.mode==='auto'?'selected':'')+' value=auto>自动</option><option '+(x.mode==='low-latency'?'selected':'')+' value=low-latency>低延迟</option></select><button class=secondary data-id="'+x.id+'" onclick="saveRouteProfile(this)">应用属性</button></div>':'')+'<button class=secondary data-id="'+x.id+'" data-action="toggle" data-enabled="'+(!x.enabled)+'" onclick="routeAction(this)">'+(x.enabled?'暂停':'恢复')+'</button> <button class=secondary data-id="'+x.id+'" data-action="delete" onclick="routeAction(this)">删除</button></div>').join(''):'暂无路由。'}
-load().then(()=>setInterval(()=>{loadPeers().catch(()=>{});loadRoutes().catch(()=>{})},5000)).catch(e=>status('Error: '+e));
-</script></html>)HTML";
+constexpr std::string_view kMissingWebAssetsPage = R"HTML(
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OAMR Web UI unavailable</title>
+<style>
+  body { margin: 0; padding: 2rem; font: 16px system-ui; background: #fff8f4; color: #201b15; }
+  main { max-width: 42rem; margin: 10vh auto; padding: 1.5rem; border-radius: 1.5rem; background: #f8ece2; }
+  code { font-family: ui-monospace, monospace; }
+</style>
+<main>
+  <h1>Web UI unavailable</h1>
+  <p>The compiled Vite assets were not found beside OAMR.</p>
+  <p>For a source build, run <code>npm ci &amp;&amp; npm run build</code> in the <code>web</code> directory, then rebuild OAMR.</p>
+</main>
+</html>)HTML";
 
 bool parse_udp_port(const std::string& text, std::uint16_t& result) {
     unsigned value{};
@@ -374,6 +367,10 @@ public:
         type = "text/plain; charset=utf-8";
         if (method == "GET") {
             if (const auto asset = static_asset(target, type)) return *asset;
+            if (target == "/" || target.starts_with("/?")) {
+                type = "text/html; charset=utf-8";
+                return std::string{kMissingWebAssetsPage};
+            }
         }
         if (method == "GET" && target.rfind("/api/devices", 0) == 0) { type = "application/json; charset=utf-8"; return devices_json(); }
         if (method == "GET" && target.rfind("/api/routes", 0) == 0) {
@@ -381,7 +378,8 @@ public:
             for (const auto& item : routes) { if (!first) out << ','; first = false; out << "{\"id\":" << item.id << ",\"label\":\"" << json_escape(item.label) << "\",\"enabled\":" << (item.enabled ? "true" : "false") << ",\"network\":" << (item.network_profile ? "true" : "false"); if (item.network_profile) out << ",\"quality\":\"" << quality_name(item.network_profile->quality) << "\",\"latency\":" << item.network_profile->max_latency_ms << ",\"mode\":\"" << mode_name(item.network_profile->mode) << "\""; out << "}"; }
             return out << ']', out.str();
         }
-        if (method == "GET" && target.rfind("/api/pair/code", 0) == 0) return pairing.create_pair_code();
+        if (method == "GET" && target.rfind("/api/pair/code", 0) == 0) return pairing.current_pair_code();
+        if (method == "POST" && target.rfind("/api/pair/code", 0) == 0) return pairing.create_pair_code();
         if (method == "GET" && target.rfind("/api/pair/local", 0) == 0) { type = "application/json; charset=utf-8"; return "{\"alias\":\"" + json_escape(pairing.local_alias()) + "\"}"; }
         if (method == "GET" && target.rfind("/api/discovery", 0) == 0) {
             type = "application/json; charset=utf-8"; std::ostringstream out;
@@ -397,13 +395,7 @@ public:
             const auto query = query_params(target); const auto alias = query.find("alias"), endpoints = query.find("endpoints"); if (alias == query.end()) return "Missing local alias.";
             pairing.set_local_alias(alias->second); std::vector<pairing::ExposedEndpoint> exposed;
             if (endpoints != query.end()) {
-                // The compact embedded UI serializes separators as JavaScript
-                // escapes. Accept those literals as well as real tabs/newlines
-                // so exposed-device updates cannot silently become empty.
-                std::string endpoint_text = endpoints->second;
-                for (std::size_t position = 0; (position = endpoint_text.find("\\n", position)) != std::string::npos; ++position) endpoint_text.replace(position, 2, "\n");
-                for (std::size_t position = 0; (position = endpoint_text.find("\\t", position)) != std::string::npos; ++position) endpoint_text.replace(position, 2, "\t");
-                std::stringstream rows(endpoint_text); std::string row; while (std::getline(rows, row, '\n')) {
+                std::stringstream rows(endpoints->second); std::string row; while (std::getline(rows, row, '\n')) {
                     const auto first_tab = row.find('\t'); const auto second_tab = row.find('\t', first_tab + 1);
                     if (first_tab == std::string::npos || row.empty()) continue;
                     const auto id = row.substr(first_tab + 1, second_tab == std::string::npos ? std::string::npos : second_tab - first_tab - 1);
@@ -464,29 +456,6 @@ public:
             } else return "Invalid paired matrix direction.";
             return "Paired matrix route added.";
         }
-        if (method == "POST" && target.rfind("/api/loopback", 0) == 0) {
-            const auto params = query_params(target);
-            const auto source = params.find("source"), sink = params.find("sink");
-            if (source == params.end() || sink == params.end()) return "Missing Source or Sink.";
-            audio::LoopbackSettings settings;
-            settings.source_device = source->second;
-            settings.sink_device = sink->second;
-            settings.capture_render_device = true;
-            if (add_route("Local: " + source->second + " → " + sink->second, settings)) return "Local route added.";
-            return "Start failed: " + error;
-        }
-        if (method == "POST" && target.rfind("/api/mirror", 0) == 0) {
-            const auto params = query_params(target);
-            const auto source = params.find("source"), sink = params.find("sink");
-            if (source == params.end() || sink == params.end()) return "Missing playback source or target.";
-            if (audio::selector_device_id(source->second) == audio::selector_device_id(sink->second)) return "Choose a different playback target to avoid feedback.";
-            audio::LoopbackSettings settings;
-            settings.source_device = source->second;
-            settings.sink_device = sink->second;
-            settings.capture_render_device = true;
-            if (add_route("Mirror: " + source->second + " → " + sink->second, settings)) return "Playback mirroring route added.";
-            return "Start failed: " + error;
-        }
         if (method == "POST" && target.rfind("/api/network/send", 0) == 0) {
             const auto params = query_params(target);
             const auto host = params.find("host"), port = params.find("port"), source = params.find("source");
@@ -517,15 +486,7 @@ public:
             if (routes_param == params.end() || routes_param->second.empty()) return "Select at least one matrix route.";
             audio::MatrixSettings settings;
             std::unordered_map<std::string, std::size_t> sources, sinks;
-            // The embedded page serializes separators as JavaScript escape
-            // sequences. Normalize them before parsing, while still accepting
-            // ordinary literal tabs/newlines from other future clients.
-            std::string route_text = routes_param->second;
-            for (std::size_t position = 0; (position = route_text.find("\\n", position)) != std::string::npos; ++position)
-                route_text.replace(position, 2, "\n");
-            for (std::size_t position = 0; (position = route_text.find("\\t", position)) != std::string::npos; ++position)
-                route_text.replace(position, 2, "\t");
-            std::stringstream stream(route_text); std::string line;
+            std::stringstream stream(routes_param->second); std::string line;
             while (std::getline(stream, line, '\n')) {
                 const auto first_separator = line.find('\t');
                 const auto second_separator = line.find('\t', first_separator + 1);
