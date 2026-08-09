@@ -12,6 +12,7 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -30,6 +31,8 @@ class AndroidPeerService private constructor(private val context: Context) {
     @Volatile private var pairCode = ""
     @Volatile private var codeExpiresAt = 0L
     private val peers = linkedMapOf<String, AndroidPeer>()
+    /** Installed by the audio layer.  The control server owns protocol parsing only. */
+    @Volatile var routeHandler: ((direction: String, endpoint: String, host: String, port: Int) -> String)? = null
 
     val nodeId: String = preferences.getString("node-id", null) ?: UUID.randomUUID().toString().replace("-", "").also {
         preferences.edit().putString("node-id", it).apply()
@@ -37,6 +40,16 @@ class AndroidPeerService private constructor(private val context: Context) {
     var alias: String
         get() = preferences.getString("alias", android.os.Build.MODEL) ?: android.os.Build.MODEL
         set(value) = preferences.edit().putString("alias", value).apply()
+
+    init {
+        preferences.getStringSet("peers", emptySet()).orEmpty().forEach { row ->
+            runCatching {
+                val fields = row.split('|')
+                require(fields.size == 4)
+                AndroidPeer(decodeStored(fields[0]), decodeStored(fields[1]), decodeStored(fields[2]), fields[3].toInt()).also { peers[it.nodeId] = it }
+            }
+        }
+    }
 
     fun endpoints(): List<AndroidEndpoint> = listOf(
         AndroidEndpoint("android-oboe-input", "Android microphone", 'S'),
@@ -82,7 +95,7 @@ class AndroidPeerService private constructor(private val context: Context) {
             val fields = query("?$reply")
             if (fields.containsKey("error")) return "Pairing failed: ${fields["error"]}"
             val remoteNode = fields["node"] ?: return "Pairing failed: invalid desktop reply"
-            synchronized(peers) { peers[remoteNode] = AndroidPeer(remoteNode, fields["alias"].orEmpty().ifBlank { host }, host, 8791) }
+            synchronized(peers) { peers[remoteNode] = AndroidPeer(remoteNode, fields["alias"].orEmpty().ifBlank { host }, host, 8791); savePeers() }
             "Paired with ${fields["alias"].orEmpty().ifBlank { host }}"
         } catch (error: Exception) { "Pairing failed: ${error.message}" }
     }
@@ -112,20 +125,35 @@ class AndroidPeerService private constructor(private val context: Context) {
             val remotePort = params["port"]?.toIntOrNull() ?: 0
             if (code != currentPairCode() || remoteNode.isBlank() || remotePort !in 1..65535) return "error=invalid-or-expired-code"
             synchronized(this) { pairCode = "" }
-            synchronized(peers) { peers[remoteNode] = AndroidPeer(remoteNode, remoteAlias.ifBlank { host }, host, remotePort) }
+            synchronized(peers) { peers[remoteNode] = AndroidPeer(remoteNode, remoteAlias.ifBlank { host }, host, remotePort); savePeers() }
             return "node=${encode(nodeId)}&alias=${encode(alias)}&catalog=${encode(catalog())}"
         }
         if (target.startsWith("/update?")) return "ok"
         if (target.startsWith("/unpair?")) {
-            params["node"]?.let { synchronized(peers) { peers.remove(it) } }
+            params["node"]?.let { synchronized(peers) { peers.remove(it); savePeers() } }
             return "ok"
         }
-        // RTP/Opus route execution is connected by the native transport layer.
-        if (target.startsWith("/route?")) return "error=android-rtp-route-not-ready"
+        if (target.startsWith("/route?")) {
+            // Desktop PairingService sends node/kind/device. Keep the old
+            // names as aliases for direct diagnostic calls during migration.
+            val remoteNode = params["node"].orEmpty()
+            val direction = params["kind"] ?: params["direction"].orEmpty()
+            val endpoint = params["device"] ?: params["endpoint"].orEmpty()
+            val port = params["port"]?.toIntOrNull() ?: 0
+            if (port !in 1..65535 || direction !in setOf("send", "receive") || remoteNode.isNotBlank() && synchronized(peers) { remoteNode !in peers }) return "error=invalid-route"
+            val handler = routeHandler ?: return "error=audio-engine-not-ready"
+            return handler(direction, endpoint, host, port).let { message -> if (message.startsWith("error=")) message else "ok" }
+        }
         return "error=not-found"
     }
 
     private fun catalog(): String = endpoints().joinToString(";") { "${it.direction},${encode(it.name)},${encode(it.id)}" }
+
+    private fun savePeers() {
+        preferences.edit().putStringSet("peers", peers.values.map { peer ->
+            listOf(encodeStored(peer.nodeId), encodeStored(peer.alias), encodeStored(peer.host), peer.port.toString()).joinToString("|")
+        }.toSet()).apply()
+    }
 
     private fun request(host: String, port: Int, path: String): String {
         val connection = (URL("http://$host:$port$path").openConnection() as HttpURLConnection).apply {
@@ -143,5 +171,7 @@ class AndroidPeerService private constructor(private val context: Context) {
         private fun query(value: String): Map<String, String> = value.substringAfter('?', "").split('&').mapNotNull { row ->
             if (row.isBlank()) null else row.substringBefore('=') to URLDecoder.decode(row.substringAfter('=', ""), StandardCharsets.UTF_8)
         }.toMap()
+        private fun encodeStored(value: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(StandardCharsets.UTF_8))
+        private fun decodeStored(value: String): String = String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8)
     }
 }

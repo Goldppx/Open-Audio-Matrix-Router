@@ -80,6 +80,13 @@ fun OAMRApp(activity: ComponentActivity) {
     val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         status = if (granted) engine.startInput() else "未授予麦克风权限"
     }
+    androidNode.routeHandler = { direction, endpoint, host, port ->
+        when {
+            direction == "send" && endpoint == "android-oboe-input" -> engine.startRtpSender(host, port)
+            direction == "receive" && endpoint == "android-oboe-output" -> engine.startRtpReceiver(port)
+            else -> "error=unsupported-android-endpoint"
+        }
+    }
     fun loadDesktop() {
         Thread {
             try {

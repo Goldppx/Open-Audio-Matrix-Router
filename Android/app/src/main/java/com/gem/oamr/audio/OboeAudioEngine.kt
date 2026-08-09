@@ -30,5 +30,11 @@ class OboeAudioEngine(context: Context) {
         .sortedBy { it.name }
 
     fun startInput(): String = nativeStartInput()
+    fun startRtpSender(host: String, port: Int): String = nativeStartRtpSender(host, port)
+    fun startRtpReceiver(port: Int): String = nativeStartRtpReceiver(port)
+    fun stopNetworkRoutes(): String = nativeStopNetworkRoutes()
     external fun nativeStartInput(): String
+    external fun nativeStartRtpSender(host: String, port: Int): String
+    external fun nativeStartRtpReceiver(port: Int): String
+    external fun nativeStopNetworkRoutes(): String
 }
