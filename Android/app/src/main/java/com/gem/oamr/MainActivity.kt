@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -31,7 +32,14 @@ import androidx.compose.material.icons.outlined.Router
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Speaker
 import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -57,6 +65,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -187,14 +196,6 @@ private fun OAMRApp(activity: ComponentActivity) {
             topBar = {
                 CenterAlignedTopAppBar(
                     title = { Text(if (destination == Destination.Home) "OAMR" else t(english, "设置", "Settings"), fontWeight = FontWeight.SemiBold) },
-                    actions = {
-                        IconButton(onClick = {
-                            darkMode = !darkMode
-                            preferences.edit().putBoolean("dark-mode", darkMode).apply()
-                        }) {
-                            Icon(if (darkMode) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, t(english, "切换主题", "Toggle theme"))
-                        }
-                    },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
                 )
             },
@@ -212,14 +213,16 @@ private fun OAMRApp(activity: ComponentActivity) {
             }
         ) { padding ->
             if (destination == Destination.Home) HomePage(
-                padding, english, node, nodeStatus, audioStatus, peers, devices, desktopStatus, desktopSnapshot,
+                padding, english, node, nodeStatus, node.isRunning(), audioStatus, peers, devices, desktopStatus, desktopSnapshot,
                 onRefresh = { peers = node.knownPeers(); devices = engine.listDevices(); if (desktopControls) loadDesktop() },
                 onStartNode = { ensureNodeRunning() },
                 onStartMic = {
                     if (ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) audioStatus = engine.startInput()
                     else { permissionAction = 2; microphonePermission.launch(Manifest.permission.RECORD_AUDIO) }
                 },
-                onStopDesktop = { desktopOperation { stopAll() } }
+                onStopDesktop = { desktopOperation { stopAll() } },
+                onToggleRoute = { route -> desktopOperation { toggle(route) } },
+                onDeleteRoute = { route -> desktopOperation { delete(route) } }
             ) else SettingsPage(
                 padding = padding, english = english, darkMode = darkMode, autoStartNode = autoStartNode, desktopControls = desktopControls,
                 pairCode = pairCode, node = node, nodeStatus = nodeStatus, peers = peers, devices = devices,
@@ -231,7 +234,7 @@ private fun OAMRApp(activity: ComponentActivity) {
                 onAutoStart = { autoStartNode = it; preferences.edit().putBoolean("auto-start-node", it).apply() },
                 onDesktopControls = { desktopControls = it; preferences.edit().putBoolean("desktop-controls", it).apply() },
                 onStartNode = { ensureNodeRunning() },
-                onNewCode = { pairCode = node.newPairCode() },
+                onNewCode = { pairCode = node.newPairCode(); nodeStatus = t(english, "已生成新的配对代码", "A new pairing code is ready") },
                 onPairHost = { androidPairHost = it }, onPairCode = { androidPairCode = it },
                 onPair = {
                     Thread { val message = node.pairDesktop(androidPairHost, androidPairCode); activity.runOnUiThread { nodeStatus = message; peers = node.knownPeers() } }.start()
@@ -253,10 +256,12 @@ private fun OAMRApp(activity: ComponentActivity) {
 
 @Composable
 private fun HomePage(
-    padding: PaddingValues, english: Boolean, node: AndroidPeerService, nodeStatus: String, audioStatus: String,
+    padding: PaddingValues, english: Boolean, node: AndroidPeerService, nodeStatus: String, nodeAvailable: Boolean, audioStatus: String,
     peers: List<AndroidPeer>, devices: List<AudioDevice>, desktopStatus: String, desktop: DesktopSnapshot,
     onRefresh: () -> Unit, onStartNode: () -> Unit, onStartMic: () -> Unit, onStopDesktop: () -> Unit,
+    onToggleRoute: (DesktopRoute) -> Unit, onDeleteRoute: (DesktopRoute) -> Unit,
 ) {
+    var ipVisible by rememberSaveable { mutableStateOf(false) }
     val ips = node.localIpv4().joinToString().ifBlank { t(english, "未连接局域网", "No LAN connection") }
     val inputs = devices.count { it.direction == "输入" }
     val outputs = devices.size - inputs
@@ -267,19 +272,26 @@ private fun HomePage(
         item {
             StatusCard(
                 icon = Icons.Outlined.Router, title = t(english, "本机节点", "This node"),
-                primary = ips, secondary = "TCP 8791 · $nodeStatus", running = !nodeStatus.contains("stopped", true) && !nodeStatus.contains("未启动")
+                primary = if (nodeAvailable) t(english, "可用", "Available") else t(english, "不可用", "Unavailable"),
+                secondary = if (nodeAvailable) t(english, "点击可查看与管理节点", "Tap to manage this node") else t(english, "点击启动常驻节点服务", "Tap to start the persistent node service"),
+                running = nodeAvailable, onClick = onStartNode
             )
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard(Modifier.weight(1f), Icons.Outlined.Mic, t(english, "输入", "Inputs"), inputs.toString(), audioStatus)
-                MetricCard(Modifier.weight(1f), Icons.Outlined.Speaker, t(english, "输出", "Outputs"), outputs.toString(), t(english, "可用端点", "Available endpoints"))
-            }
+            MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Mic, t(english, "输入", "Inputs"), inputs.toString(), audioStatus, onStartMic)
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard(Modifier.weight(1f), Icons.Outlined.Devices, t(english, "已连接设备", "Peers"), peers.size.toString(), t(english, "已配对节点", "Paired nodes"))
-                MetricCard(Modifier.weight(1f), Icons.Outlined.Link, t(english, "运行路线", "Routes"), desktop.routes.count { it.enabled }.toString(), t(english, "桌面矩阵", "Desktop matrix"))
+            MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Speaker, t(english, "输出", "Outputs"), outputs.toString(), t(english, "可用端点", "Available endpoints"))
+        }
+        item { MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Devices, t(english, "已连接设备", "Peers"), peers.size.toString(), t(english, "已配对节点", "Paired nodes")) }
+        item { MetricCard(Modifier.fillMaxWidth(), Icons.Outlined.Link, t(english, "运行路线", "Routes"), desktop.routes.count { it.enabled }.toString(), t(english, "桌面矩阵", "Desktop matrix")) }
+        item {
+            Card(shape = MaterialTheme.shapes.extraLarge) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Wifi, null)
+                    Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(t(english, "网络地址", "Network address"), style = MaterialTheme.typography.titleSmall); Text(if (ipVisible) ips else t(english, "已隐藏", "Hidden"), style = MaterialTheme.typography.bodySmall) }
+                    IconButton(onClick = { ipVisible = !ipVisible }) { Icon(if (ipVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, t(english, "显示或隐藏 IP", "Show or hide IP")) }
+                }
             }
         }
         item { SectionTitle(t(english, "连接状态", "Connection status"), Icons.Outlined.Wifi, onRefresh) }
@@ -293,11 +305,9 @@ private fun HomePage(
                 }
             }
         }
-        item { SectionTitle(t(english, "音频端点", "Audio endpoints"), Icons.Outlined.Speaker) }
-        items(devices.take(6), key = { it.id }) { device -> EndpointRow(device, english) }
         if (desktop.routes.isNotEmpty()) {
             item { SectionTitle(t(english, "当前路线", "Active routes"), Icons.Outlined.Link) }
-            items(desktop.routes, key = { it.id }) { route -> RouteRow(route, english) }
+            items(desktop.routes, key = { it.id }) { route -> RouteRow(route, english, { onToggleRoute(route) }, { onDeleteRoute(route) }) }
             item { OutlinedButton(onClick = onStopDesktop, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Stop, null); Text(t(english, "停止桌面全部路线", "Stop all desktop routes"), Modifier.padding(start = 8.dp)) } }
         }
         item {
@@ -330,6 +340,13 @@ private fun SettingsPage(
             HorizontalDivider()
             SettingToggle(if (darkMode) Icons.Outlined.DarkMode else Icons.Outlined.LightMode, t(english, "深色模式", "Dark mode"), t(english, "手动切换", "Manual override"), darkMode, onDarkMode)
         } }
+        item { SettingsSection(t(english, "配对", "Pairing"), Icons.Outlined.Link) {
+            Text("${t(english, "一次性代码", "One-time code")}  $pairCode", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = onNewCode) { Icon(Icons.Outlined.Refresh, null); Text(t(english, "生成新代码", "Generate new code"), Modifier.padding(start = 8.dp)) }
+            OutlinedTextField(androidPairHost, onPairHost, label = { Text(t(english, "桌面 OAMR IP 地址", "Desktop OAMR IP address")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(androidPairCode, onPairCode, label = { Text(t(english, "桌面一次性代码", "Desktop one-time code")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Button(onClick = onPair, enabled = androidPairHost.isNotBlank() && androidPairCode.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text(t(english, "与桌面配对", "Pair with desktop")) }
+        } }
         item { SettingsSection(t(english, "节点与功能", "Node & features"), Icons.Outlined.Router) {
             Text("${node.localIpv4().joinToString().ifBlank { t(english, "未连接局域网", "No LAN connection") }}:8791", style = MaterialTheme.typography.titleSmall)
             Text(nodeStatus, style = MaterialTheme.typography.bodySmall)
@@ -338,13 +355,6 @@ private fun SettingsPage(
             SettingToggle(Icons.Outlined.Router, t(english, "自动启动节点", "Auto-start node"), t(english, "打开应用时启动", "Start when app opens"), autoStartNode, onAutoStart)
             HorizontalDivider()
             SettingToggle(Icons.Outlined.Devices, t(english, "桌面控制", "Desktop controls"), t(english, "显示桌面矩阵控制", "Show desktop matrix controls"), desktopControls, onDesktopControls)
-        } }
-        item { SettingsSection(t(english, "配对", "Pairing"), Icons.Outlined.Link) {
-            Text("${t(english, "一次性代码", "One-time code")}  $pairCode", style = MaterialTheme.typography.titleMedium)
-            OutlinedButton(onClick = onNewCode) { Icon(Icons.Outlined.Refresh, null); Text(t(english, "生成新代码", "Generate new code"), Modifier.padding(start = 8.dp)) }
-            OutlinedTextField(androidPairHost, onPairHost, label = { Text(t(english, "桌面 OAMR IP 地址", "Desktop OAMR IP address")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(androidPairCode, onPairCode, label = { Text(t(english, "桌面一次性代码", "Desktop one-time code")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = onPair, enabled = androidPairHost.isNotBlank() && androidPairCode.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text(t(english, "与桌面配对", "Pair with desktop")) }
         } }
         item { SettingsSection(t(english, "本机配对矩阵", "This node's paired matrix"), Icons.Outlined.Router) {
             OutlinedButton(onClick = onRefreshPeers, modifier = Modifier.fillMaxWidth()) { Text(t(english, "刷新已配对设备", "Refresh paired devices")) }
@@ -382,8 +392,8 @@ private fun SettingsPage(
     }
 }
 
-@Composable private fun StatusCard(icon: ImageVector, title: String, primary: String, secondary: String, running: Boolean) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = MaterialTheme.shapes.extraLarge) {
+@Composable private fun StatusCard(icon: ImageVector, title: String, primary: String, secondary: String, running: Boolean, onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = if (running) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant), shape = MaterialTheme.shapes.extraLarge) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Text(title, Modifier.padding(start = 10.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold); AssistChip(onClick = {}, label = { Text(if (running) "ONLINE" else "IDLE") }, Modifier.padding(start = 8.dp)) }
             Text(primary, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -392,8 +402,8 @@ private fun SettingsPage(
     }
 }
 
-@Composable private fun MetricCard(modifier: Modifier, icon: ImageVector, title: String, value: String, subtitle: String) {
-    Card(modifier, shape = MaterialTheme.shapes.extraLarge) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { Icon(icon, null); Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Text(title, style = MaterialTheme.typography.titleSmall); Text(subtitle, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) } }
+@Composable private fun MetricCard(modifier: Modifier, icon: ImageVector, title: String, value: String, subtitle: String, onClick: (() -> Unit)? = null) {
+    Card(if (onClick == null) modifier else modifier.clickable(onClick = onClick), shape = MaterialTheme.shapes.extraLarge) { Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Column(Modifier.padding(start = 14.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(title, style = MaterialTheme.typography.titleSmall); Text(subtitle, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }; Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
 }
 
 @Composable private fun SectionTitle(title: String, icon: ImageVector, onRefresh: (() -> Unit)? = null) {
@@ -404,9 +414,15 @@ private fun SettingsPage(
 
 @Composable private fun EndpointRow(device: AudioDevice, english: Boolean) { Card(shape = MaterialTheme.shapes.large) { Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) { Icon(if (device.direction == "输入") Icons.Outlined.Mic else Icons.Outlined.Speaker, null); Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(device.name, style = MaterialTheme.typography.titleSmall); Text("${if (device.direction == "输入") t(english, "输入", "Input") else t(english, "输出", "Output")} · ${device.sampleRates}", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }; AssistChip(onClick = {}, label = { Text(t(english, "可用", "Ready")) }) } } }
 
-@Composable private fun RouteRow(route: DesktopRoute, english: Boolean) { Card(shape = MaterialTheme.shapes.large) { Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Link, null); Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(route.label, style = MaterialTheme.typography.titleSmall); Text(route.profile, style = MaterialTheme.typography.bodySmall) }; AssistChip(onClick = {}, label = { Text(if (route.enabled) t(english, "运行", "Live") else t(english, "暂停", "Paused")) }) } } }
+@Composable private fun RouteRow(route: DesktopRoute, english: Boolean, onToggle: () -> Unit, onDelete: () -> Unit) { Card(shape = MaterialTheme.shapes.large) { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Link, null); Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(route.label, style = MaterialTheme.typography.titleSmall); Text(route.profile, style = MaterialTheme.typography.bodySmall) }; AssistChip(onClick = {}, label = { Text(if (route.enabled) t(english, "运行", "Live") else t(english, "暂停", "Paused")) }) }; Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onToggle) { Icon(if (route.enabled) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, null); Text(if (route.enabled) t(english, "暂停", "Pause") else t(english, "恢复", "Resume"), Modifier.padding(start = 4.dp)) }; OutlinedButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, null); Text(t(english, "删除", "Delete"), Modifier.padding(start = 4.dp)) } } } } }
 
-@Composable private fun SettingsSection(title: String, icon: ImageVector, content: @Composable () -> Unit) { Card(shape = MaterialTheme.shapes.extraLarge) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Text(title, Modifier.padding(start = 10.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }; content() } } }
+@Composable private fun SettingsSection(title: String, icon: ImageVector, content: @Composable () -> Unit) {
+    var expanded by rememberSaveable(title) { mutableStateOf(title == "配对" || title == "Pairing") }
+    Card(shape = MaterialTheme.shapes.extraLarge) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Text(title, Modifier.padding(start = 10.dp).weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold); Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null) }
+        if (expanded) content()
+    } }
+}
 
 @Composable private fun SettingToggle(icon: ImageVector, title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(title, style = MaterialTheme.typography.titleSmall); Text(subtitle, style = MaterialTheme.typography.bodySmall) }; Switch(checked, onCheckedChange) } }
 

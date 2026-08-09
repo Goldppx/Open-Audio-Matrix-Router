@@ -75,6 +75,8 @@ class AndroidPeerService private constructor(private val context: Context) {
         listener = null
     }
 
+    @Synchronized fun isRunning(): Boolean = listener != null && !listener!!.isClosed
+
     @Synchronized fun newPairCode(): String {
         val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         pairCode = buildString(6) { repeat(6) { append(alphabet[SecureRandom().nextInt(alphabet.length)]) } }

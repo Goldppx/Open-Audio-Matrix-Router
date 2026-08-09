@@ -9,7 +9,11 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
@@ -55,4 +59,14 @@ fun OAMRTheme(
         typography = Typography,
         content = content
     )
+    val view = LocalView.current
+    if (!view.isInEditMode) SideEffect {
+        val activity = view.context as? Activity ?: return@SideEffect
+        activity.window.statusBarColor = colorScheme.surface.toArgb()
+        activity.window.navigationBarColor = colorScheme.surface.toArgb()
+        WindowCompat.getInsetsController(activity.window, view).apply {
+            isAppearanceLightStatusBars = !darkTheme
+            isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
 }
