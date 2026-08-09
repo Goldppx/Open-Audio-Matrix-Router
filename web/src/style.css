@@ -37,8 +37,12 @@ button, input, select { font: inherit; }
 .pairing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .stack { display: grid; gap: 12px; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-.icon-action { display: inline-flex; align-items: center; justify-content: center; min-width: 48px; min-height: 42px; border-radius: 999px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); box-shadow: var(--oamr-elevation-1); --md-icon-button-icon-color: var(--md-sys-color-on-primary); --md-icon-button-hover-icon-color: var(--md-sys-color-on-primary); }
-.icon-action md-icon-button { color: inherit; }
+.card-action-bar { display: flex; justify-content: flex-end; margin-top: 14px; }
+.icon-action { display: inline-flex; align-items: center; justify-content: center; inline-size: 48px; block-size: 48px; border: 1px solid var(--md-sys-color-outline-variant); border-radius: 16px; background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); box-shadow: var(--oamr-elevation-1); transition: background var(--oamr-motion) var(--oamr-ease), color var(--oamr-motion) var(--oamr-ease), box-shadow var(--oamr-motion) var(--oamr-ease), transform var(--oamr-motion) var(--oamr-ease); --md-icon-button-icon-color: var(--md-sys-color-on-secondary-container); --md-icon-button-hover-icon-color: var(--md-sys-color-on-secondary-container); }
+.icon-action:hover { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); box-shadow: var(--oamr-elevation-2); transform: translateY(-1px); --md-icon-button-icon-color: var(--md-sys-color-on-primary); --md-icon-button-hover-icon-color: var(--md-sys-color-on-primary); }
+.icon-action:focus-within { outline: 2px solid var(--md-sys-color-primary); outline-offset: 3px; }
+.icon-action md-icon-button { color: inherit; inline-size: 48px; block-size: 48px; }
+.icon-action svg { fill: currentColor; }
 md-filled-button, md-outlined-button, md-text-button, md-icon-button { transition: transform var(--oamr-motion) var(--oamr-ease); }
 @media (hover: hover) and (pointer: fine) { md-filled-button:hover, md-outlined-button:hover, md-text-button:hover, md-icon-button:hover { transform: translateY(-1px); } }
 md-outlined-text-field, md-filled-select { width: 100%; }
@@ -111,6 +115,7 @@ md-divider { margin: 18px 0; }
   .actions { display: grid; grid-template-columns: 1fr; }
   .actions > * { width: 100%; }
   .actions > .icon-action { width: auto; }
+  .card-action-bar { justify-content: flex-end; }
   .route-actions { justify-content: flex-start; }
   .peer-title { align-items: flex-start; flex-wrap: wrap; }
   .discovery-heading { align-items: flex-start; flex-direction: column; }
