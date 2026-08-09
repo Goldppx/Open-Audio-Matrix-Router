@@ -101,6 +101,7 @@ md-divider { margin: var(--oamr-space-4) 0; }
 .matrix-disabled-mark { display: grid; place-items: center; inline-size: var(--oamr-touch-target); color: var(--md-sys-color-outline); }
 .matrix-selection-summary { display: grid; gap: var(--oamr-space-2); padding: var(--oamr-space-4); border-radius: var(--oamr-radius-md); background: var(--md-sys-color-surface-container-high); color: var(--md-sys-color-on-surface-variant); }
 .matrix-summary-title { color: var(--md-sys-color-on-surface); font-weight: 600; }
+.matrix-mixer-hint { padding: var(--oamr-space-2) var(--oamr-space-3); border-radius: var(--oamr-radius-sm); background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); font-size: .88rem; font-weight: 600; }
 .matrix-summary-route { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--oamr-space-2); font-size: .88rem; }
 .matrix-summary-route span:not([aria-hidden]) { overflow-wrap: anywhere; }
 .matrix-summary-route span:last-child { text-align: end; }

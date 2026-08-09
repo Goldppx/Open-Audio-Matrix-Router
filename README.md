@@ -9,6 +9,8 @@ kept as a build target through the GStreamer backend abstraction.
 
 - Enumerate WASAPI capture and playback devices through GStreamer.
 - Local microphone/render-loopback to one or more playback routes.
+- Mixer routes: multiple local sources, or multiple paired RTP sources, into
+  one playback endpoint.
 - RTP/UDP + Opus audio send and receive with 48 kHz PCM conversion.
 - Multiple independently startable routes, with pause, resume and deletion.
 - Per-network-route quality, latency target and mode adjustment.
@@ -42,8 +44,9 @@ computers to run the same recent OAMR portable release.
 3. On each computer, select the devices to expose and save the pairing profile.
 4. Generate a one-time pairing code on one computer; enter its IP, TCP 8791,
    alias and code on the other computer.
-5. Use **音频矩阵** to create local or paired RTP routes. Modify quality,
-   target latency and mode afterwards in **路由表**.
+5. Use **音频矩阵** to create local or paired RTP routes. Select multiple
+   sources in one output column to create a mixer. Modify quality, target
+   latency and mode afterwards in **路由表**.
 
 Allow inbound TCP 8791 and discovery UDP 8792 on a Private Windows network. RTP media ports are
 selected dynamically from the 52000 range for paired matrix routes; permit the

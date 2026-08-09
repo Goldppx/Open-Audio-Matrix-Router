@@ -65,6 +65,27 @@ std::string receiver_description(const audio::ReceiverSettings& settings) {
     return pipeline.str();
 }
 
+/** Builds one shared render pipeline for several independent RTP receivers.
+ * Each decode leg has its own jitter buffer, then hands PCM to audiomixer.
+ * Keeping the mixer inside one GStreamer pipeline avoids competing opens of
+ * the same physical WASAPI/CoreAudio/ALSA playback endpoint. */
+std::string network_mixer_description(const audio::NetworkMixerSettings& settings) {
+    const DeviceSelector sink = parse_selector(settings.sink_device, "autoaudiosink");
+    std::ostringstream pipeline;
+    for (std::size_t index = 0; index < settings.inputs.size(); ++index) {
+        const auto network = *audio::resolve_network_profile(settings.inputs[index].network);
+        pipeline << "udpsrc port=" << settings.inputs[index].port
+                 << " caps=\"application/x-rtp,media=audio,encoding-name=OPUS,payload=96,clock-rate=48000\" "
+                 << "! rtpjitterbuffer name=receiver_jitter" << index
+                 << " latency=" << network.jitter_buffer_ms
+                 << " drop-on-latency=" << (network.drop_on_latency ? "true" : "false")
+                 << " do-lost=true ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! audioconvert ! queue ! mix. ";
+    }
+    pipeline << "audiomixer name=mix ! audioconvert ! audioresample ! audioconvert ! "
+             << sink.factory << " name=sink sync=true";
+    return pipeline.str();
+}
+
 std::string loopback_description(const audio::LoopbackSettings& settings) {
     const DeviceSelector source = parse_selector(settings.source_device, "autoaudiosrc");
     const DeviceSelector sink = parse_selector(settings.sink_device, "autoaudiosink");
@@ -237,6 +258,21 @@ bool RtpOpusPipeline::start_receiver(const audio::ReceiverSettings& settings) {
     return started;
 }
 
+bool RtpOpusPipeline::start_network_mixer(const audio::NetworkMixerSettings& settings) {
+    if (settings.inputs.size() < 2 || !valid_pcm(settings.pcm)) {
+        impl_->error = "Network mixer requires at least two RTP inputs and valid PCM settings.";
+        return false;
+    }
+    for (const auto& input : settings.inputs) {
+        if (input.port == 0 || !audio::resolve_network_profile(input.network)) {
+            impl_->error = "Network mixer input requires a non-zero port and valid network profile.";
+            return false;
+        }
+    }
+    return impl_->start(network_mixer_description(settings),
+                        parse_selector(settings.sink_device, "autoaudiosink").device, "sink");
+}
+
 bool RtpOpusPipeline::start_loopback(const audio::LoopbackSettings& settings) {
     if (!valid_pcm(settings.pcm)) {
         impl_->error = "Loopback requires valid PCM settings.";
@@ -278,19 +314,34 @@ bool RtpOpusPipeline::is_running() const noexcept { return impl_->pipeline != nu
 const std::string& RtpOpusPipeline::last_error() const noexcept { return impl_->error; }
 std::optional<audio::TransportTelemetry> RtpOpusPipeline::transport_telemetry() const noexcept {
     if (impl_->pipeline == nullptr) return std::nullopt;
-    GstElement* jitter = gst_bin_get_by_name(GST_BIN(impl_->pipeline), "receiver_jitter");
-    if (jitter == nullptr) return std::nullopt;
-    GstStructure* stats = nullptr;
-    g_object_get(jitter, "stats", &stats, nullptr);
-    gst_object_unref(jitter);
-    if (stats == nullptr) return std::nullopt;
-    guint64 pushed{}, lost{};
-    const bool has_pushed = gst_structure_get_uint64(stats, "num-pushed", &pushed);
-    const bool has_lost = gst_structure_get_uint64(stats, "num-lost", &lost);
-    gst_structure_free(stats);
-    if (!has_pushed && !has_lost) return std::nullopt;
-    const auto total = pushed + lost;
-    return audio::TransportTelemetry{pushed, lost, total == 0 ? 0.0 : static_cast<double>(lost) * 100.0 / static_cast<double>(total)};
+    std::uint64_t received{}, lost{};
+    bool found = false;
+    const auto collect = [&](const std::string& name) {
+        GstElement* jitter = gst_bin_get_by_name(GST_BIN(impl_->pipeline), name.c_str());
+        if (jitter == nullptr) return;
+        found = true;
+        GstStructure* stats = nullptr;
+        g_object_get(jitter, "stats", &stats, nullptr);
+        gst_object_unref(jitter);
+        if (stats == nullptr) return;
+        guint64 pushed{}, dropped{};
+        const bool has_pushed = gst_structure_get_uint64(stats, "num-pushed", &pushed);
+        const bool has_lost = gst_structure_get_uint64(stats, "num-lost", &dropped);
+        gst_structure_free(stats);
+        if (has_pushed) received += pushed;
+        if (has_lost) lost += dropped;
+    };
+    collect("receiver_jitter");
+    for (std::size_t index = 0;; ++index) {
+        const std::string name = "receiver_jitter" + std::to_string(index);
+        GstElement* probe = gst_bin_get_by_name(GST_BIN(impl_->pipeline), name.c_str());
+        if (probe == nullptr) break;
+        gst_object_unref(probe);
+        collect(name);
+    }
+    if (!found) return std::nullopt;
+    const auto total = received + lost;
+    return audio::TransportTelemetry{received, lost, total == 0 ? 0.0 : static_cast<double>(lost) * 100.0 / static_cast<double>(total)};
 }
 std::optional<audio::ResolvedNetworkProfile> RtpOpusPipeline::resolved_network_profile() const noexcept { return impl_->network_profile; }
 

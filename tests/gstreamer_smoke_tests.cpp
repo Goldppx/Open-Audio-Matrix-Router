@@ -26,5 +26,28 @@ int main() {
             route->stop();
         }
     }
+
+    // The local matrix is also a mixer: two independent inputs share one
+    // audiomixer and one render endpoint. Fake elements keep this test free
+    // from physical audio hardware.
+    oamr::audio::MatrixSettings local_mixer;
+    local_mixer.source_devices = {"audiotestsrc|", "audiotestsrc|"};
+    local_mixer.sink_devices = {"fakesink|"};
+    local_mixer.routes = {{0, 0}, {1, 0}};
+    auto local_route = backend->create_matrix(local_mixer);
+    assert(local_route);
+    assert(local_route->poll());
+    local_route->stop();
+
+    // A shared RTP mixer owns one sink, while each UDP input keeps its own
+    // jitter buffer. It may not receive packets in a smoke test, but it must
+    // enter a valid running state without opening a real device.
+    oamr::audio::NetworkMixerSettings network_mixer;
+    network_mixer.sink_device = "fakesink|";
+    network_mixer.inputs = {{56001, {}}, {56002, {}}};
+    auto network_route = backend->create_network_mixer(network_mixer);
+    assert(network_route);
+    assert(network_route->poll());
+    network_route->stop();
     std::cout << "GStreamer RTP/Opus sender smoke tests passed.\n";
 }

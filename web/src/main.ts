@@ -376,7 +376,17 @@ function matrixCheckbox(choice: MatrixChoice): string {
 function matrixSummaryHtml(): string {
   const selected = [...matrixSelections].map(key => matrixChoices.get(key)).filter((choice): choice is MatrixChoice => choice !== undefined);
   if (!selected.length) return `<div class="matrix-summary-empty">${uiLabel('尚未选择路线。', 'No routes selected.')}</div>`;
-  return `<div class="matrix-summary-title">${uiLabel(`已选择 ${selected.length} 条路线`, `${selected.length} route${selected.length === 1 ? '' : 's'} selected`)}</div>${selected.map(choice => `<div class="matrix-summary-route"><span>${escapeHtml(choice.sourceName)}</span><span aria-hidden="true">→</span><span>${escapeHtml(choice.targetName)}</span></div>`).join('')}`;
+  const mixerTargets = new Map<string, MatrixChoice[]>();
+  for (const choice of selected) {
+    const entries = mixerTargets.get(choice.targetName) ?? [];
+    entries.push(choice);
+    mixerTargets.set(choice.targetName, entries);
+  }
+  const mixerHints = [...mixerTargets.values()]
+    .filter(entries => entries.length > 1)
+    .map(entries => `<div class="matrix-mixer-hint">${uiLabel(`混音：${entries.length} 个来源 → ${entries[0].targetName}`, `Mixer: ${entries.length} sources → ${entries[0].targetName}`)}</div>`)
+    .join('');
+  return `<div class="matrix-summary-title">${uiLabel(`已选择 ${selected.length} 条路线`, `${selected.length} route${selected.length === 1 ? '' : 's'} selected`)}</div>${mixerHints}${selected.map(choice => `<div class="matrix-summary-route"><span>${escapeHtml(choice.sourceName)}</span><span aria-hidden="true">→</span><span>${escapeHtml(choice.targetName)}</span></div>`).join('')}`;
 }
 
 function updateMatrixViewState(): void {
@@ -437,7 +447,7 @@ function renderMatrix(): void {
     const origin = isRemoteDevice(sink) ? '网络' : '本机';
     return `<label class="matrix-target${choice ? '' : ' disabled'}">${choice ? matrixCheckbox(choice) : '<span class="matrix-disabled-mark">—</span>'}<span class="matrix-target-name">${escapeHtml(sink.name)}</span><span class="matrix-origin">${origin}</span></label>`;
   }).join('') : '<div class="empty">正在加载设备…</div>';
-  byId<HTMLElement>('matrix').innerHTML = `<div class="matrix-toolbar" role="group" aria-label="${uiLabel('矩阵显示方式', 'Matrix display mode')}"><button type="button" data-matrix-view="builder">路线选择</button><button type="button" data-matrix-view="matrix">矩阵视图</button></div><div class="matrix-builder"><p class="matrix-help">选择一个音频来源，然后勾选一个或多个播放目标。</p><md-outlined-select id="matrixMobileSource" label="音频来源" clamp-menu-width>${sourceOptions}</md-outlined-select><div class="matrix-target-heading">播放目标</div><div class="matrix-targets">${targets}</div><div class="matrix-selection-summary" aria-live="polite">${matrixSummaryHtml()}</div></div><div class="matrix-desktop data-table-wrap"><table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${isRemoteDevice(sink) ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  byId<HTMLElement>('matrix').innerHTML = `<div class="matrix-toolbar" role="group" aria-label="${uiLabel('矩阵显示方式', 'Matrix display mode')}"><button type="button" data-matrix-view="builder">路线选择</button><button type="button" data-matrix-view="matrix">矩阵视图</button></div><div class="matrix-builder"><p class="matrix-help">${uiLabel('可将多个来源勾选到同一播放目标，OAMR 会在该目标混音。', 'Select multiple sources for one playback target to mix them together.')}</p><md-outlined-select id="matrixMobileSource" label="音频来源" clamp-menu-width>${sourceOptions}</md-outlined-select><div class="matrix-target-heading">播放目标</div><div class="matrix-targets">${targets}</div><div class="matrix-selection-summary" aria-live="polite">${matrixSummaryHtml()}</div></div><div class="matrix-desktop data-table-wrap"><table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${isRemoteDevice(sink) ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   wireMatrixControls();
   applyPreferences();
 }
@@ -572,7 +582,20 @@ async function applyMatrix(): Promise<void> {
     const routes = local.map(item => `${item.source}\t${item.loopback}\t${item.sink}`).join('\n');
     await post(`/api/matrix?routes=${encodeURIComponent(routes)}`);
   }
-  for (const item of remote) {
+  const mixerGroups = new Map<string, MatrixChoice[]>();
+  for (const item of remote.filter(item => item.kind === 'receive')) {
+    const group = mixerGroups.get(item.local!) ?? [];
+    group.push(item);
+    mixerGroups.set(item.local!, group);
+  }
+  const mixed = new Set<string>();
+  for (const group of mixerGroups.values()) {
+    if (group.length < 2) continue;
+    const rows = group.map(item => `${item.peer}\t${item.remote}\t${item.local}`).join('\n');
+    await post(`/api/paired/mixer?routes=${encodeURIComponent(rows)}&quality=medium&max-latency-ms=100&mode=auto`);
+    for (const item of group) mixed.add(item.key);
+  }
+  for (const item of remote.filter(item => !mixed.has(item.key))) {
     const query = new URLSearchParams({ peer: item.peer!, kind: item.kind!, local: item.local!, remote: item.remote!, loopback: String(item.loopback), quality: 'medium', 'max-latency-ms': '100', mode: 'auto' });
     await post(`/api/paired/route?${query}`);
   }

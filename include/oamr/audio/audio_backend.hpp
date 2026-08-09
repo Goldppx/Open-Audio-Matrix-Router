@@ -56,13 +56,14 @@ public:
     [[nodiscard]] virtual std::vector<DeviceInfo> list_sources() const = 0;
     [[nodiscard]] virtual std::vector<DeviceInfo> list_sinks() const = 0;
 
-    /** The five route kinds the MVP supports. Each returns nullptr on
+    /** The six route kinds the MVP supports. Each returns nullptr on
      *  failure and records the reason in last_error(). */
     virtual std::unique_ptr<AudioRoute> create_loopback(const LoopbackSettings& settings) = 0;
     virtual std::unique_ptr<AudioRoute> create_fanout(const FanoutSettings& settings) = 0;
     virtual std::unique_ptr<AudioRoute> create_matrix(const MatrixSettings& settings) = 0;
     virtual std::unique_ptr<AudioRoute> create_sender(const SenderSettings& settings) = 0;
     virtual std::unique_ptr<AudioRoute> create_receiver(const ReceiverSettings& settings) = 0;
+    virtual std::unique_ptr<AudioRoute> create_network_mixer(const NetworkMixerSettings& settings) = 0;
 
     /** Reason for the last failed create_* call. */
     [[nodiscard]] virtual const std::string& last_error() const noexcept = 0;

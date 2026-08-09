@@ -21,6 +21,7 @@ class GStreamerRoute final : public audio::AudioRoute {
 public:
     bool start_sender(const audio::SenderSettings& settings) { return pipeline_.start_sender(settings); }
     bool start_receiver(const audio::ReceiverSettings& settings) { return pipeline_.start_receiver(settings); }
+    bool start_network_mixer(const audio::NetworkMixerSettings& settings) { return pipeline_.start_network_mixer(settings); }
     bool start_loopback(const audio::LoopbackSettings& settings) { return pipeline_.start_loopback(settings); }
     bool start_fanout(const audio::FanoutSettings& settings) { return pipeline_.start_local_fanout(settings); }
     bool start_matrix(const audio::MatrixSettings& settings) { return pipeline_.start_local_matrix(settings); }
@@ -112,6 +113,9 @@ public:
     }
     std::unique_ptr<audio::AudioRoute> create_receiver(const audio::ReceiverSettings& settings) override {
         return start_route([&](GStreamerRoute& route) { return route.start_receiver(settings); });
+    }
+    std::unique_ptr<audio::AudioRoute> create_network_mixer(const audio::NetworkMixerSettings& settings) override {
+        return start_route([&](GStreamerRoute& route) { return route.start_network_mixer(settings); });
     }
 
     [[nodiscard]] const std::string& last_error() const noexcept override { return error_; }

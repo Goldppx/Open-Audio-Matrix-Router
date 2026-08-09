@@ -174,7 +174,7 @@ std::string mode_name(audio::LatencyMode mode) {
 /** Settings of one active route; kept so a route can be rebuilt on resume or profile change. */
 using RouteSettings = std::variant<audio::LoopbackSettings, audio::FanoutSettings,
                                    audio::MatrixSettings, audio::SenderSettings,
-                                   audio::ReceiverSettings>;
+                                   audio::ReceiverSettings, audio::NetworkMixerSettings>;
 
 } // namespace
 class WebServer::Impl {
@@ -206,7 +206,8 @@ public:
             else if constexpr (std::is_same_v<T, audio::FanoutSettings>) return backend->create_fanout(value);
             else if constexpr (std::is_same_v<T, audio::MatrixSettings>) return backend->create_matrix(value);
             else if constexpr (std::is_same_v<T, audio::SenderSettings>) return backend->create_sender(value);
-            else return backend->create_receiver(value);
+            else if constexpr (std::is_same_v<T, audio::ReceiverSettings>) return backend->create_receiver(value);
+            else return backend->create_network_mixer(value);
         }, settings);
     }
 
@@ -255,6 +256,8 @@ public:
                 using T = std::decay_t<decltype(settings)>;
                 if constexpr (std::is_same_v<T, audio::SenderSettings> || std::is_same_v<T, audio::ReceiverSettings>)
                     settings.network = profile;
+                else if constexpr (std::is_same_v<T, audio::NetworkMixerSettings>)
+                    for (auto& input : settings.inputs) input.network = profile;
             }, item.settings);
             if (!item.enabled) return true;
             item.route.reset();
@@ -474,6 +477,51 @@ public:
             if (node == query.end() || !pairing.remove_peer(node->second)) { diagnostics::write(diagnostics::Level::Warning, "Could not remove paired device: unknown node."); return "Could not remove paired device."; }
             diagnostics::write(diagnostics::Level::Info, "Removed paired device " + node->second + ".");
             return "Paired device removed.";
+        }
+        if (method == "POST" && target.rfind("/api/paired/mixer", 0) == 0) {
+            const auto query = query_params(target);
+            const auto routes_param = query.find("routes");
+            audio::NetworkProfile profile;
+            if (routes_param == query.end() || !network_profile_from(query, profile)) return "Invalid network mixer request.";
+
+            struct MixerRow { std::string peer_id; std::string remote_device; std::string local_sink; };
+            std::vector<MixerRow> rows;
+            std::stringstream stream(routes_param->second);
+            std::string row;
+            while (std::getline(stream, row, '\n')) {
+                const auto first_tab = row.find('\t');
+                const auto second_tab = row.find('\t', first_tab == std::string::npos ? 0 : first_tab + 1);
+                if (first_tab == std::string::npos || second_tab == std::string::npos) continue;
+                rows.push_back({row.substr(0, first_tab), row.substr(first_tab + 1, second_tab - first_tab - 1), row.substr(second_tab + 1)});
+            }
+            if (rows.size() < 2) return "A mixer needs at least two remote sources.";
+            const std::string& sink = rows.front().local_sink;
+            if (sink.empty() || std::any_of(rows.begin(), rows.end(), [&](const MixerRow& value) { return value.local_sink != sink || value.peer_id.empty() || value.remote_device.empty(); }))
+                return "Mixer routes must use one valid local playback target.";
+
+            const auto peer_list = pairing.peers();
+            audio::NetworkMixerSettings settings;
+            settings.sink_device = sink;
+            for (std::size_t index = 0; index < rows.size(); ++index) {
+                const auto peer = std::find_if(peer_list.begin(), peer_list.end(), [&](const auto& value) { return value.node_id == rows[index].peer_id; });
+                if (peer == peer_list.end()) return "A selected paired source is no longer available.";
+                const std::uint16_t media_port = static_cast<std::uint16_t>(52000 + ((next_route_id + index) % 1000));
+                pairing::RemoteRouteRequest remote;
+                remote.kind = pairing::RemoteRouteKind::Send;
+                remote.device_id = rows[index].remote_device;
+                remote.port = media_port;
+                remote.quality = quality_name(profile.quality);
+                remote.max_latency_ms = profile.max_latency_ms;
+                remote.mode = mode_name(profile.mode);
+                if (!pairing.request_remote_route(rows[index].peer_id, remote)) {
+                    diagnostics::write(diagnostics::Level::Error, "Remote mixer sender rejected by " + peer->alias + ": " + pairing.last_error());
+                    return "Remote mixer sender failed: " + pairing.last_error();
+                }
+                settings.inputs.push_back({media_port, profile});
+            }
+            if (!add_network_route("Network mixer (" + std::to_string(settings.inputs.size()) + " sources) → " + sink, profile, settings))
+                return "Network mixer failed: " + error;
+            return "Network mixer route added.";
         }
         if (method == "POST" && target.rfind("/api/paired/route", 0) == 0) {
             const auto query = query_params(target); const auto peer_id = query.find("peer"), kind = query.find("kind"), local_device = query.find("local"), remote_device = query.find("remote"), loopback = query.find("loopback");

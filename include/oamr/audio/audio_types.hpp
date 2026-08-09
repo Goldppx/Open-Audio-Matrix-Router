@@ -107,6 +107,19 @@ struct ReceiverSettings {
     NetworkProfile network{};
 };
 
+/** One RTP/Opus receive leg feeding a shared local playback mixer. */
+struct NetworkMixerInput {
+    std::uint16_t port{};
+    NetworkProfile network{};
+};
+
+/** Mixes several RTP/Opus receive legs into one local playback endpoint. */
+struct NetworkMixerSettings {
+    std::vector<NetworkMixerInput> inputs;
+    std::string sink_device;  // Empty selects the operating system default.
+    PcmSettings pcm{};
+};
+
 /**
  * Extracts the backend device part of a `factory|device` selector. Returns
  * the whole string when it contains no separator, and an empty string when

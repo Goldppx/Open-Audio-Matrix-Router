@@ -25,6 +25,7 @@ public:
 
     bool start_sender(const audio::SenderSettings& settings);
     bool start_receiver(const audio::ReceiverSettings& settings);
+    bool start_network_mixer(const audio::NetworkMixerSettings& settings);
     bool start_loopback(const audio::LoopbackSettings& settings);
     bool start_local_fanout(const audio::FanoutSettings& settings);
     bool start_local_matrix(const audio::MatrixSettings& settings);
