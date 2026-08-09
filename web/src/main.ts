@@ -28,14 +28,29 @@ type ValueElement = HTMLElement & { value: string };
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let devices: Devices = { sources: [], sinks: [] };
 let peers: Peer[] = [];
+let matrixDirty = false;
+let deleteConfirmation: number | undefined;
+let selectedRoute: Route | undefined;
+type LogLevel = 'VERBOSE' | 'INFO' | 'WARNING' | 'ERROR';
+const logs: Array<{ level: LogLevel; message: string; time: string }> = [];
 
 const escapeHtml = (value: unknown) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]!);
 const byId = <T extends HTMLElement>(id: string) => document.querySelector<T>(`#${id}`)!;
 const value = (id: string) => (byId<ValueElement>(id).value ?? '').trim();
 const checked = (selector: string) => Array.from(document.querySelectorAll<Checkable>(selector)).filter(item => item.checked);
 
-function setStatus(message: string): void {
-  byId<HTMLElement>('status').textContent = message;
+function setStatus(message: string, level: LogLevel = 'INFO'): void {
+  logs.unshift({ level, message, time: new Date().toLocaleTimeString() });
+  renderLogs();
+}
+
+function renderLogs(): void {
+  const output = document.querySelector<HTMLElement>('#status');
+  if (!output) return;
+  const filter = document.querySelector<ValueElement>('#logLevel')?.value ?? 'INFO';
+  const minimum = ['VERBOSE', 'INFO', 'WARNING', 'ERROR'].indexOf(filter);
+  output.textContent = logs.filter(item => ['VERBOSE', 'INFO', 'WARNING', 'ERROR'].indexOf(item.level) >= minimum)
+    .map(item => `[${item.time}] ${item.level}: ${item.message}`).join('\n') || '暂无日志。';
 }
 
 async function request(path: string, method = 'GET'): Promise<string> {
@@ -53,7 +68,7 @@ async function post(path: string): Promise<string> {
     return message;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setStatus(`操作失败：${message}`);
+    setStatus(`操作失败：${message}`, 'ERROR');
     throw error;
   }
 }
@@ -95,6 +110,29 @@ function renderDeviceControls(): void {
   ].join('');
 }
 
+function enhancePanels(): void {
+  const log = byId<HTMLElement>('status');
+  const logCard = log.closest('section');
+  if (logCard && !document.querySelector('#logLevel')) {
+    const controls = document.createElement('div');
+    controls.className = 'log-controls';
+    controls.innerHTML = `<md-outlined-select id="logLevel" label="显示级别"><md-select-option value="VERBOSE"><div slot="headline">VERBOSE</div></md-select-option><md-select-option value="INFO" selected><div slot="headline">INFO</div></md-select-option><md-select-option value="WARNING"><div slot="headline">WARNING</div></md-select-option><md-select-option value="ERROR"><div slot="headline">ERROR</div></md-select-option></md-outlined-select>`;
+    logCard.insertBefore(controls, log);
+    byId<HTMLElement>('logLevel').addEventListener('change', renderLogs);
+  }
+  const exposure = byId<HTMLElement>('exposure');
+  const save = byId<HTMLElement>('saveProfile');
+  if (!exposure.parentElement?.querySelector('.exposure-details')) {
+    const details = document.createElement('details');
+    details.className = 'exposure-details';
+    details.innerHTML = '<summary>选择要向已配对设备开放的本机端点</summary>';
+    exposure.replaceWith(details);
+    details.append(exposure);
+    save.parentElement?.replaceWith(save);
+    details.append(save);
+  }
+}
+
 function remoteDevices(direction: Direction): RemoteDevice[] {
   return peers.flatMap(peer => peer.endpoints.filter(endpoint => endpoint.direction === direction).map(endpoint => ({ id: endpoint.id, name: `${peer.alias} · ${endpoint.name}`, peer: peer.nodeId, remote: true })));
 }
@@ -119,13 +157,14 @@ function renderMatrix(): void {
     return `<tr><th>${escapeHtml(source.name)}${'remote' in source ? ' <small>网络</small>' : ''}</th>${cells}</tr>`;
   }).join('');
   byId<HTMLElement>('matrix').innerHTML = `<table class="data-table matrix-table"><thead><tr><th>来源 \ 播放目标</th>${sinks.map(sink => `<th>${escapeHtml(sink.name)}${'remote' in sink ? ' <small>网络</small>' : ''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+  document.querySelectorAll<HTMLElement>('#matrix md-checkbox').forEach(item => item.addEventListener('change', () => { matrixDirty = true; }));
 }
 
 function profileSelect(id: string, current: string | number | undefined, options: Array<[string, string]>): string {
   return `<md-outlined-select id="${id}" class="route-property">${options.map(([key, label]) => `<md-select-option value="${key}" ${String(current) === key ? 'selected' : ''}><div slot="headline">${label}</div></md-select-option>`).join('')}</md-outlined-select>`;
 }
 
-function renderRoutes(routes: Route[]): void {
+function renderRoutesLegacy(routes: Route[]): void {
   const content = routes.length ? `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>路线</th><th>状态</th><th>网络属性</th><th>操作</th></tr></thead><tbody>${routes.map(route => `<tr><td>${escapeHtml(route.label)}</td><td>${route.enabled ? '运行中' : '已暂停'}</td><td>${route.network ? `<div class="route-actions">${profileSelect(`quality-${route.id}`, route.quality, [['low', '低音质'], ['medium', '中音质'], ['high', '高音质']])}${profileSelect(`latency-${route.id}`, route.latency, [['40', '40 ms'], ['60', '60 ms'], ['100', '100 ms'], ['150', '150 ms']])}${profileSelect(`mode-${route.id}`, route.mode, [['stable', '稳定'], ['auto', '自动'], ['low-latency', '低延迟']])}<md-text-button data-profile="${route.id}">应用</md-text-button></div>` : '本地路线'}</td><td><div class="route-actions"><md-text-button data-toggle="${route.id}" data-enabled="${!route.enabled}">${route.enabled ? '暂停' : '恢复'}</md-text-button><md-text-button data-delete="${route.id}">删除</md-text-button></div></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">暂无路线。</div>';
   byId<HTMLElement>('routeTable').innerHTML = content;
   document.querySelectorAll<HTMLElement>('[data-toggle]').forEach(button => button.addEventListener('click', () => void post(`/api/routes/${button.dataset.toggle}/toggle?enabled=${button.dataset.enabled}`)));
@@ -134,6 +173,45 @@ function renderRoutes(routes: Route[]): void {
     const id = button.dataset.profile!;
     void post(`/api/routes/${id}/profile?quality=${encodeURIComponent(value(`quality-${id}`))}&max-latency-ms=${encodeURIComponent(value(`latency-${id}`))}&mode=${encodeURIComponent(value(`mode-${id}`))}`);
   }));
+}
+
+function renderRoutes(routes: Route[]): void {
+  const rows = routes.map(route => {
+    const deleteText = deleteConfirmation === route.id ? '确认删除' : '删除';
+    const deleteClass = deleteConfirmation === route.id ? 'danger-action' : '';
+    const configuration = route.network ? `<md-text-button data-config="${route.id}">配置</md-text-button>` : '';
+    return `<tr><td>${escapeHtml(route.label)}</td><td>${route.enabled ? '运行中' : '已暂停'}</td><td>${route.network ? `${route.quality} · ${route.latency} ms · ${route.mode}` : '本地路线'}</td><td><div class="route-actions"><md-text-button data-toggle="${route.id}" data-enabled="${!route.enabled}">${route.enabled ? '暂停' : '恢复'}</md-text-button>${configuration}<md-text-button class="${deleteClass}" data-delete="${route.id}">${deleteText}</md-text-button></div></td></tr>`;
+  }).join('');
+  byId<HTMLElement>('routeTable').innerHTML = routes.length ? `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>路线</th><th>状态</th><th>传输属性</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">暂无路线。</div>';
+  document.querySelectorAll<HTMLElement>('[data-toggle]').forEach(button => button.addEventListener('click', () => void post(`/api/routes/${button.dataset.toggle}/toggle?enabled=${button.dataset.enabled}`)));
+  document.querySelectorAll<HTMLElement>('[data-config]').forEach(button => button.addEventListener('click', () => openRouteDialog(routes.find(route => route.id === Number(button.dataset.config))!)));
+  document.querySelectorAll<HTMLElement>('[data-delete]').forEach(button => button.addEventListener('click', () => {
+    const id = Number(button.dataset.delete);
+    if (deleteConfirmation !== id) { deleteConfirmation = id; renderRoutes(routes); setStatus('再次点击“确认删除”才会移除此路线。', 'WARNING'); return; }
+    deleteConfirmation = undefined;
+    void post(`/api/routes/${id}/delete`);
+  }));
+}
+
+function openRouteDialog(route: Route): void {
+  selectedRoute = route;
+  let dialog = document.querySelector<HTMLElement & { show: () => void; close: () => void }>('#routeDialog');
+  if (!dialog) {
+    dialog = document.createElement('md-dialog') as HTMLElement & { show: () => void; close: () => void };
+    dialog.id = 'routeDialog';
+    dialog.innerHTML = `<div slot="headline">路线配置</div><div slot="content" class="dialog-form"><md-outlined-select id="routeQuality" label="音质"><md-select-option value="low"><div slot="headline">低</div></md-select-option><md-select-option value="medium"><div slot="headline">中</div></md-select-option><md-select-option value="high"><div slot="headline">高</div></md-select-option></md-outlined-select><md-outlined-select id="routeLatency" label="最大延迟"><md-select-option value="40"><div slot="headline">40 ms</div></md-select-option><md-select-option value="60"><div slot="headline">60 ms</div></md-select-option><md-select-option value="100"><div slot="headline">100 ms</div></md-select-option><md-select-option value="150"><div slot="headline">150 ms</div></md-select-option></md-outlined-select><md-outlined-select id="routeMode" label="模式"><md-select-option value="stable"><div slot="headline">稳定模式</div></md-select-option><md-select-option value="auto"><div slot="headline">自动模式</div></md-select-option><md-select-option value="low-latency"><div slot="headline">低延迟模式</div></md-select-option></md-outlined-select></div><div slot="actions"><md-text-button id="cancelRoute">取消</md-text-button><md-filled-button id="saveRoute">保存</md-filled-button></div>`;
+    document.body.append(dialog);
+    byId<HTMLElement>('cancelRoute').addEventListener('click', () => dialog?.close());
+    byId<HTMLElement>('saveRoute').addEventListener('click', () => void (async () => {
+      if (!selectedRoute) return;
+      await post(`/api/routes/${selectedRoute.id}/profile?quality=${value('routeQuality')}&max-latency-ms=${value('routeLatency')}&mode=${value('routeMode')}`);
+      dialog?.close();
+    })());
+  }
+  byId<ValueElement>('routeQuality').value = route.quality ?? 'medium';
+  byId<ValueElement>('routeLatency').value = String(route.latency ?? 100);
+  byId<ValueElement>('routeMode').value = route.mode ?? 'auto';
+  dialog.show();
 }
 
 function renderPeers(): void {
@@ -163,7 +241,7 @@ function openPeerDialog(nodeId: string): void {
 async function refreshPeers(): Promise<void> {
   peers = JSON.parse(await request('/api/pair/peers')) as Peer[];
   renderPeers();
-  renderMatrix();
+  if (!matrixDirty) renderMatrix();
 }
 
 async function refreshRoutes(): Promise<void> {
@@ -184,6 +262,8 @@ async function applyMatrix(): Promise<void> {
     await post(`/api/paired/route?${query}`);
   }
   await refreshPeers();
+  matrixDirty = false;
+  renderMatrix();
 }
 
 function wireEvents(): void {
@@ -216,6 +296,7 @@ function wireEvents(): void {
 async function start(): Promise<void> {
   renderShell();
   wireEvents();
+  enhancePanels();
   try {
     devices = JSON.parse(await request('/api/devices')) as Devices;
     const local = JSON.parse(await request('/api/pair/local')) as { alias: string };

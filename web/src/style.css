@@ -58,7 +58,12 @@ md-divider { margin: 18px 0; }
 .endpoint-chip { margin: 6px 4px 0 0; }
 .exposure-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 240px; overflow: auto; padding: 5px; }
 .exposure-row { display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 10px; background: var(--md-sys-color-surface-container-high); }
-.log { margin: 0; min-height: 28px; padding: 12px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; background: var(--md-sys-color-surface-container-lowest); border-radius: 12px; color: var(--md-sys-color-on-surface-variant); }
+.exposure-details summary { cursor: pointer; color: var(--md-sys-color-primary); margin: 8px 0 12px; font-weight: 600; }
+.exposure-details[open] summary { margin-bottom: 14px; }
+.log-controls { display: flex; justify-content: flex-end; margin: 0 0 10px; }
+.log-controls md-outlined-select { width: 180px; }
+.log { margin: 0; height: 220px; padding: 12px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; background: var(--md-sys-color-surface-container-lowest); border-radius: 12px; color: var(--md-sys-color-on-surface-variant); }
+.danger-action { --md-text-button-label-text-color: var(--md-sys-color-error); --md-text-button-hover-label-text-color: var(--md-sys-color-error); }
 .empty { color: var(--md-sys-color-on-surface-variant); padding: 16px 0; }
 .dialog-form { display: grid; gap: 13px; padding: 4px; min-width: min(400px, 80vw); }
 
