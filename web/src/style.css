@@ -69,9 +69,8 @@ md-divider { margin: 18px 0; }
 .route-property { min-width: 102px; }
 .route-table-host { min-block-size: 64px; }
 .route-table-placeholder { display: flex; align-items: center; min-block-size: 64px; }
-.matrix-host { min-block-size: 260px; }
-.matrix-host > .data-table-wrap { min-block-size: 260px; }
-.matrix-placeholder { display: flex; align-items: center; min-block-size: 260px; padding-inline: 16px; }
+.matrix-host { min-block-size: 64px; }
+.matrix-placeholder.empty { display: flex; align-items: center; min-block-size: 64px; padding: 16px; }
 .peer-list-host { min-block-size: 64px; }
 .peer-list-placeholder { display: flex; align-items: center; min-block-size: 64px; }
 .peer-card { padding: 13px 0; border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline) 45%, transparent); }
