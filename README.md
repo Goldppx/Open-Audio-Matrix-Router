@@ -95,11 +95,11 @@ separate Node HTTP server are not part of the portable runtime.
 Windows example:
 
 ```powershell
-cmake -S . -B build-release -G "NMake Makefiles" `
+cmake -S . -B build/windows -G "NMake Makefiles" `
   -DCMAKE_BUILD_TYPE=Release `
   -DGSTREAMER_ROOT="C:/Program Files/GStreamer/1.0/msvc_x86_64"
-cmake --build build-release
-ctest --test-dir build-release --output-on-failure
+cmake --build build/windows
+ctest --test-dir build/windows --output-on-failure
 ```
 
 For the repeatable release workflow:
@@ -108,8 +108,9 @@ For the repeatable release workflow:
 .\scripts\build-and-package.ps1 -Version 0.2.4-dev
 ```
 
-It configures the Release build, executes the tests, and writes a portable ZIP
-to `dist/`.
+It configures `build/windows`, executes the tests, and writes a portable ZIP
+to `dist/`. Linux build trees belong under `build/linux`; CMake build products
+are intentionally ignored by Git.
 
 ## Architecture
 

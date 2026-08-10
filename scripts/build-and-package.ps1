@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$BuildDirectory = "build-pairing-ui-release",
+    [string]$BuildDirectory = "build/windows",
     [string]$Version = "0.3.0-material-web",
     [string]$GStreamerRoot = "C:\Program Files\GStreamer\1.0\msvc_x86_64"
 )

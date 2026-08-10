@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$BuildDirectory = "build-portable-release",
+    [string]$BuildDirectory = "build/windows",
     [string]$GStreamerRoot = "C:\Program Files\GStreamer\1.0\msvc_x86_64",
     [string]$VCRuntimeDirectory = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Redist\MSVC\14.51.36231\x64\Microsoft.VC145.CRT",
     [string]$OutputDirectory = "dist",
